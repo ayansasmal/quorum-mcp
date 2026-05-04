@@ -16,10 +16,6 @@ import { withAuditPipeline } from '../audit/pipeline.js'
 import { buildAuditVersionImpact } from '../governance/provenance.js'
 import { TriggeredBy } from '../graph/schema.js'
 import { handler as rememberHandler } from './remember.js'
-import { loadPrompt } from '../prompts/loader.js'
-
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY
-const LLM_MODEL = process.env.LLM_MODEL_NAME ?? 'gpt-4o-mini'
 
 export const schema = z.object({
   task_summary: z.string().min(1).describe('Summary of the completed task'),
@@ -34,77 +30,54 @@ export const schema = z.object({
  */
 
 /**
- * Extract learnable knowledge from a task summary using LLM.
+ * Extract learnable knowledge via the gateway LLM (POST /governance/extract).
+ * The MCP never calls OpenAI directly — the gateway owns the LLM key.
+ * Returns empty array with a logged warning when the gateway endpoint is unavailable.
+ *
  * @param {string} taskSummary
- * @param {string[]} [decisionsMade]
- * @param {string[]} [patternsUsed]
- * @returns {Promise<ExtractedItem[]>}
+ * @param {string[]} decisionsMade
+ * @param {string[]} patternsUsed
+ * @param {import('../gateway/client.js').GatewayClient} gw
+ * @returns {Promise<{ items: ExtractedItem[], llmUnavailable: boolean }>}
  */
-async function extractKnowledge(taskSummary, decisionsMade = [], patternsUsed = []) {
-  if (!OPENAI_API_KEY) {
-    return []
-  }
-
-  const decisionsBlock = decisionsMade.length
-    ? `\nExplicit decisions made:\n- ${decisionsMade.join('\n- ')}`
-    : ''
-  const patternsBlock = patternsUsed.length
-    ? `\nPatterns used:\n- ${patternsUsed.join('\n- ')}`
-    : ''
-  const { system, user } = loadPrompt('extract-knowledge.md', {
-    taskSummary,
-    decisionsBlock,
-    patternsBlock,
-  })
-
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${OPENAI_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: LLM_MODEL,
-      messages: [
-        { role: 'system', content: system },
-        { role: 'user', content: user },
-      ],
-      max_tokens: 800,
-      temperature: 0,
-      response_format: { type: 'json_object' },
-    }),
-  })
-
-  if (!response.ok) return []
-
+async function extractKnowledge(taskSummary, decisionsMade = [], patternsUsed = [], gw) {
   try {
-    const data = await response.json()
-    const text = data.choices?.[0]?.message?.content ?? '{}'
-    const parsed = JSON.parse(text)
-    return parsed.items ?? []
-  } catch {
-    return []
+    const result = await gw._post('/governance/extract', {
+      task_summary: taskSummary,
+      decisions_made: decisionsMade,
+      patterns_used: patternsUsed,
+    })
+    return { items: result.items ?? [], llmUnavailable: false }
+  } catch (err) {
+    const isNotImplemented = err.message?.includes('404') || err.message?.includes('501')
+    if (isNotImplemented) {
+      console.error('[Quorum:reflect] Gateway LLM not yet enabled (POST /governance/extract not found). Configure OPENAI_API_KEY on the gateway to enable knowledge extraction.')
+    } else {
+      console.error(`[Quorum:reflect] Knowledge extraction unavailable: ${err.message}`)
+    }
+    return { items: [], llmUnavailable: true }
   }
 }
 
 /**
- * Check if an identical DRAFT for this topic:key already exists in knowledge_versions.
- * Prevents reflect() from inserting the same content twice on repeated task summaries.
+ * Check if an identical DRAFT for this topic:key already exists.
+ * Uses version history via gateway — avoids raw SQL.
  *
- * @param {import('pg').Pool} pg
+ * @param {import('../gateway/client.js').GatewayClient} gw
  * @param {string} topic
  * @param {string} key
  * @param {string} contentHash - SHA-256 hex of the content body
  * @returns {Promise<boolean>}
  */
-async function isDuplicateReflect(pg, topic, key, contentHash) {
-  const { rows } = await pg.query(
-    `SELECT id FROM knowledge_versions
-     WHERE topic = $1 AND key = $2 AND status = 'DRAFT' AND content_hash = $3
-     LIMIT 1`,
-    [topic, key, contentHash],
-  )
-  return rows.length > 0
+async function isDuplicateReflect(gw, topic, key, contentHash) {
+  try {
+    const history = await gw.getVersionHistory(topic, key)
+    return Array.isArray(history) && history.some(
+      (v) => v.status === 'DRAFT' && v.content_hash === contentHash,
+    )
+  } catch {
+    return false
+  }
 }
 
 /**
@@ -122,10 +95,11 @@ export async function handler(pg, input) {
       governanceData: { task_summary_length: input.task_summary.length },
     },
     async () => {
-      const extracted = await extractKnowledge(
+      const { items: extracted, llmUnavailable } = await extractKnowledge(
         input.task_summary,
-        input.decisions_made,
-        input.patterns_used,
+        input.decisions_made ?? [],
+        input.patterns_used ?? [],
+        pg,
       )
 
       const stored = []
@@ -174,11 +148,13 @@ export async function handler(pg, input) {
           items: stored,
           conflict_items: conflicts,
           failed_items: failed,
-          note: extracted.length === 0
-            ? 'No team-specific knowledge identified in this task.'
-            : skipped === extracted.length
-              ? `All ${extracted.length} item(s) already in DRAFT — no duplicates stored.`
-              : `${stored.length} knowledge item(s) added as DRAFT — pending review.${skipped > 0 ? ` ${skipped} skipped (duplicate).` : ''}`,
+          note: llmUnavailable
+            ? 'Knowledge extraction unavailable — the Quorum gateway does not have LLM configured (OPENAI_API_KEY not set on the gateway). Use remember() to manually record key decisions from this task.'
+            : extracted.length === 0
+              ? 'No team-specific knowledge identified in this task.'
+              : skipped === extracted.length
+                ? `All ${extracted.length} item(s) already in DRAFT — no duplicates stored.`
+                : `${stored.length} knowledge item(s) added as DRAFT — pending review.${skipped > 0 ? ` ${skipped} skipped (duplicate).` : ''}`,
         },
         versionImpact: buildAuditVersionImpact([], []),
       }

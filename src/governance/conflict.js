@@ -8,9 +8,8 @@
  *   4. If delta > AUTHORITY_THRESHOLD: auto-supersede + notify
  *   5. Else: return structured decision brief for human resolution
  *
- * The LLM call uses OPENAI_API_KEY directly (not via Graphiti).
- * Graphiti has its own LLM for entity extraction — Quorum uses its own
- * for conflict detection to keep the concerns separate.
+ * LLM calls are delegated to the gateway via POST /governance/detect-conflict
+ * and POST /governance/enrich. The MCP never calls OpenAI directly.
  *
  * Resolution options (v0.2):
  *   supersede      — incoming replaces existing entirely
@@ -27,11 +26,8 @@
 import { searchNodes } from '../graph/client.js'
 import { calculateAuthority, shouldAutoSupersede } from './authority.js'
 import { getConfig } from '../config/loader.js'
-import { loadPrompt } from '../prompts/loader.js'
 
 const DEFAULT_CONFLICT_THRESHOLD = parseFloat(process.env.QUORUM_CONFLICT_THRESHOLD ?? '0.85')
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY
-const LLM_MODEL = process.env.LLM_MODEL_NAME ?? 'gpt-4o-mini'
 
 // ── Tag normalization ─────────────────────────────────────────────────────────
 
@@ -67,143 +63,69 @@ function getConflictThreshold(domain) {
 // ── LLM contradiction check ───────────────────────────────────────────────────
 
 /**
- * Ask the LLM whether two pieces of knowledge contradict each other,
- * and whether they might actually be different scenarios rather than a true conflict.
- * Returns structured JSON so the reviewer sees the split signal prominently.
+ * Ask the gateway LLM whether two pieces of knowledge contradict each other.
+ * Routes to POST /governance/detect-conflict — the gateway owns the LLM key.
+ * On any failure, flags for human review rather than silently passing.
  *
  * @param {string} existing
  * @param {string} incoming
+ * @param {import('../gateway/client.js').GatewayClient} gw
  * @returns {Promise<{ contradicts: boolean, reason: string, possible_split: boolean, split_suggestion?: string }>}
  */
-async function checkContradiction(existing, incoming) {
-  if (!OPENAI_API_KEY) {
-    return {
-      contradicts: true,
-      reason: 'LLM not configured — flagging for human review',
-      possible_split: false,
-    }
-  }
-
-  const { system, user } = loadPrompt('check-contradiction.md', { existing, incoming })
-
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${OPENAI_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: LLM_MODEL,
-      messages: [
-        { role: 'system', content: system },
-        { role: 'user', content: user },
-      ],
-      max_tokens: 200,
-      temperature: 0,
-      response_format: { type: 'json_object' },
-    }),
-  })
-
-  if (!response.ok) {
-    return {
-      contradicts: true,
-      reason: `LLM check failed (${response.status}) — flagging for human review`,
-      possible_split: false,
-    }
-  }
-
+async function checkContradiction(existing, incoming, gw) {
   try {
-    const data = await response.json()
-    const parsed = JSON.parse(data.choices?.[0]?.message?.content ?? '{}')
-    const possibleSplit = Boolean(parsed.possible_split)
+    const result = await gw._post('/governance/detect-conflict', { existing, incoming })
+    const possibleSplit = Boolean(result.possible_split)
     return {
-      contradicts: Boolean(parsed.contradicts),
-      reason: parsed.reason ?? '',
+      contradicts: Boolean(result.contradicts),
+      reason: result.reason ?? '',
       possible_split: possibleSplit,
-      split_suggestion: possibleSplit ? (parsed.split_suggestion ?? null) : null,
+      split_suggestion: possibleSplit ? (result.split_suggestion ?? null) : null,
     }
-  } catch {
-    return {
-      contradicts: true,
-      reason: 'LLM response unparseable — flagging for human review',
-      possible_split: false,
-    }
+  } catch (err) {
+    const isNotImplemented = err.message?.includes('404') || err.message?.includes('501')
+    const reason = isNotImplemented
+      ? 'Gateway LLM governance not yet enabled (POST /governance/detect-conflict not found). Flagging for human review — configure OPENAI_API_KEY on the gateway to enable automatic conflict detection.'
+      : `Conflict detection unavailable (${err.message}). Flagging for human review.`
+    return { contradicts: true, reason, possible_split: false }
   }
 }
 
 /**
- * Generate reviewer enrichment via LLM — called at conflict creation time,
- * stored in pending_decisions.enrichment so reviewers get instant analysis.
+ * Generate reviewer enrichment via the gateway LLM (POST /governance/enrich).
+ * Called at conflict creation time — stored in pending_decisions so reviewers
+ * get instant analysis without waiting for an LLM call during review.
  *
  * @param {string} existing
  * @param {string} incoming
  * @param {string} conflictReason
  * @param {boolean} possibleSplit
  * @param {string | undefined} splitSuggestion
+ * @param {import('../gateway/client.js').GatewayClient} gw
  * @returns {Promise<Record<string, unknown>>}
  */
-export async function generateEnrichment(existing, incoming, conflictReason, possibleSplit, splitSuggestion) {
-  if (!OPENAI_API_KEY) {
-    return {
-      analysis: 'LLM not configured — manual review required.',
-      risks_if_approved: [],
-      questions_for_reviewer: ['Is the incoming knowledge correct in this context?'],
-      existing_rationale: null,
-      possible_split: possibleSplit,
-      split_suggestion: splitSuggestion ?? null,
-    }
+export async function generateEnrichment(existing, incoming, conflictReason, possibleSplit, splitSuggestion, gw) {
+  const fallback = {
+    analysis: 'Enrichment unavailable — gateway LLM not configured (OPENAI_API_KEY not set on the gateway).',
+    risks_if_approved: ['Review both entries manually before deciding.'],
+    questions_for_reviewer: ['Is the incoming knowledge correct in this context?'],
+    existing_rationale: null,
+    possible_split: possibleSplit,
+    split_suggestion: splitSuggestion ?? null,
   }
 
-  const splitNote = possibleSplit
-    ? `\nThe contradiction detector flagged that these may actually describe different scenarios. Suggested scoping: "${splitSuggestion}"`
-    : ''
-  const { system, user } = loadPrompt('generate-enrichment.md', {
-    existing,
-    incoming,
-    conflictReason,
-    splitNote,
-  })
-
   try {
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${OPENAI_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: LLM_MODEL,
-        messages: [
-          { role: 'system', content: system },
-          { role: 'user', content: user },
-        ],
-        max_tokens: 500,
-        temperature: 0.1,
-        response_format: { type: 'json_object' },
-      }),
-    })
-    if (!response.ok) throw new Error(`HTTP ${response.status}`)
-    const data = await response.json()
-    const parsed = JSON.parse(data.choices?.[0]?.message?.content ?? '{}')
-    // Clamp array lengths to the bounds stated in the prompt so a non-compliant
-    // model response never silently passes through with 0 or 10 items.
-    const risks = Array.isArray(parsed.risks_if_approved) ? parsed.risks_if_approved : []
-    const questions = Array.isArray(parsed.questions_for_reviewer) ? parsed.questions_for_reviewer : []
-    return {
-      ...parsed,
-      risks_if_approved:        risks.slice(0, 4).length >= 2 ? risks.slice(0, 4) : risks.slice(0, 4).concat(Array(Math.max(0, 2 - risks.length)).fill('Review this aspect carefully before deciding.')),
-      questions_for_reviewer:   questions.slice(0, 3).length >= 2 ? questions.slice(0, 3) : questions.slice(0, 3).concat(Array(Math.max(0, 2 - questions.length)).fill('Is the incoming knowledge correct in this context?')),
-    }
-  } catch (err) {
-    console.error(`[Quorum:conflict] Enrichment LLM call failed: ${err.message}`)
-    return {
-      analysis: 'Enrichment unavailable — LLM call failed.',
-      risks_if_approved: [],
-      questions_for_reviewer: ['Review both entries manually before deciding.'],
-      existing_rationale: null,
+    const result = await gw._post('/governance/enrich', {
+      existing,
+      incoming,
+      conflict_reason: conflictReason,
       possible_split: possibleSplit,
       split_suggestion: splitSuggestion ?? null,
-    }
+    })
+    return { ...fallback, ...result }
+  } catch (err) {
+    console.error(`[Quorum:conflict] Enrichment unavailable: ${err.message}`)
+    return fallback
   }
 }
 
@@ -228,9 +150,10 @@ export async function generateEnrichment(existing, incoming, conflictReason, pos
  * @param {string} topic
  * @param {string} key
  * @param {string} [domain] - domain name for per-domain threshold lookup
+ * @param {import('../gateway/client.js').GatewayClient} [gw]
  * @returns {Promise<ConflictResult>}
  */
-export async function detectConflict(newContent, topic, key, domain) {
+export async function detectConflict(newContent, topic, key, domain, gw) {
   const conflictThreshold = getConflictThreshold(domain)
 
   let searchResult
@@ -256,6 +179,7 @@ export async function detectConflict(newContent, topic, key, domain) {
     const result = await checkContradiction(
       node.summary ?? node.content ?? JSON.stringify(node),
       newContent,
+      gw,
     ).catch(() => ({ contradicts: false, reason: '', possible_split: false }))
 
     if (result.contradicts) {

@@ -116,7 +116,7 @@ export async function handler(pg, input, identity) {
       if (existing) {
         enforceReasonRequired(input.reason, 'remember (supersede)')
 
-        const conflictResult = await detectConflict(input.content, input.topic, input.key, domain)
+        const conflictResult = await detectConflict(input.content, input.topic, input.key, domain, pg)
 
         // GAP-03: Graphiti was unavailable — store as PENDING_CONFLICT_CHECK for deferred re-check
         if (conflictResult.graphiti_unavailable) {
@@ -141,6 +141,7 @@ export async function handler(pg, input, identity) {
               conflictResult.reason,
               conflictResult.possible_split ?? false,
               conflictResult.split_suggestion,
+              pg,
             )
 
             // Count other pending decisions for same topic:key (ordering context)

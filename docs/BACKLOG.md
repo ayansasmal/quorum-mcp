@@ -14,7 +14,7 @@
 | BL-02 | Port `cli.js` to GatewayClient HTTP | P2 | ✅ Done | pg removed. All commands use GatewayClient. `audit lineage` deferred — needs gateway endpoint. |
 | BL-02a | `GET /pg/audit/lineage/:topic/:key` gateway endpoint | P3 | 🟡 To Do | Needed by `quorum audit lineage`. `quorum` repo. |
 | BL-03 | `npx quorum start` command | P2 | 🟡 To Do | Blocked on BL-07 (lite compose). `bin` field + npm org already done. |
-| BL-04 | LLM retry + `reflect()` fallback + startup check | P3 | 🟡 To Do | 3 small independent changes, ship as one commit. |
+| BL-04 | LLM retry in conflict detection | P3 | 🟡 To Do | Retry wrapper on `gw._post('/governance/detect-conflict')` — 3 attempts with backoff. |
 | BL-07 | Graphiti graceful degradation in `graph/client.js` | P5 | 🟡 To Do | `graphitiAvailable` flag — lite compose lives in the `quorum` repo. |
 | BL-08 | `ingest_pr()` MCP tool | P6 | 🟡 To Do | `dry_run: true` default. GitHub Action deferred to v1.0. |
 | BL-09 | Prompt rendering unit tests | P7 | 🟡 To Do | Pure function tests + manual validation script. No LLM calls in CI. |
@@ -182,6 +182,7 @@ deterministic parts (rendering, parsing) — not LLM output quality.
 
 | Date | Item | Commit |
 |------|------|--------|
+| 2026-05-04 | Remove OPENAI_API_KEY from MCP — conflict/enrich/extract route through gateway | pending |
 | 2026-05-04 | BL-02: pg removed from cli.js — all commands now use GatewayClient HTTP | pending |
 | 2026-05-04 | `quorum install` CLI command — copies skill + runs `claude mcp add` | pending |
 | 2026-05-04 | Repo split from monorepo — `mcp/` extracted to `quorum-mcp` | 7a904bc |

@@ -78,7 +78,7 @@ export QUORUM_GATEWAY_URL=https://quorum.your-org.internal
 |----------|---------|-------------|
 | `QUORUM_GATEWAY_URL` | `http://localhost:3001` | URL of the Quorum gateway |
 | `QUORUM_AUTHOR` | git email | Identity override — useful in CI contexts |
-| `OPENAI_API_KEY` | — | Required for LLM features (conflict detection, extraction). Tools degrade gracefully without it. |
+| `QUORUM_GITHUB_TOKEN` | — | GitHub PAT for gateway authentication (required for audit/history CLI commands) |
 
 ---
 
