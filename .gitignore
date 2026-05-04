@@ -1,0 +1,16 @@
+node_modules/
+dist/
+.env
+coverage/
+*.log
+.DS_Store
+.DS_STORE
+
+logs/
+!logs/.gitkeep
+
+.vscode/
+.idea/
+
+.claude/
+.claire/
