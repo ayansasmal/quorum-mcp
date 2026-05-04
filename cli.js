@@ -22,7 +22,7 @@ import { fileURLToPath } from 'node:url'
 import { createInterface } from 'node:readline'
 import { spawnSync } from 'node:child_process'
 import { homedir } from 'node:os'
-import { GatewayClient } from './src/gateway/client.js'
+import { GatewayClient, setGatewayToken } from './src/gateway/client.js'
 import { verifyChain } from './src/audit/chain.js'
 import { handler as historyHandler } from './src/tools/history.js'
 import { findQuorumFile, loadQuorumFile, suggestProjectId } from './src/quorum-file.js'
@@ -53,29 +53,12 @@ function resolveGatewayConfig() {
 }
 
 /**
- * Create an authenticated GatewayClient for CLI commands.
- * Requires QUORUM_GITHUB_TOKEN in the environment.
- * @returns {GatewayClient}
- */
-function getCliGatewayClient() {
-  const { gatewayUrl, projectId } = resolveGatewayConfig()
-  const githubToken = process.env.QUORUM_GITHUB_TOKEN
-
-  if (!githubToken) {
-    console.error('Error: QUORUM_GITHUB_TOKEN is not set.')
-    console.error('Set it to a GitHub Personal Access Token so the gateway can verify your identity.')
-    process.exit(1)
-  }
-
-  return new GatewayClient(gatewayUrl, githubToken, projectId)
-}
-
-/**
- * Fetch a raw JWT token from the gateway (for config/projects commands that pass it manually).
+ * Exchange a GitHub PAT for a Gateway-MCP Token (CLI-only auth path).
+ * Used in non-interactive contexts (CI, scripts) where browser OAuth is unavailable.
  * @param {string} gatewayUrl
- * @returns {Promise<string>} JWT access token
+ * @returns {Promise<string>} Gateway-MCP Token (ES256 JWT)
  */
-async function fetchToken(gatewayUrl) {
+async function fetchTokenFromPAT(gatewayUrl) {
   const githubToken = process.env.QUORUM_GITHUB_TOKEN
   if (!githubToken) {
     console.error('Error: QUORUM_GITHUB_TOKEN is not set.')
@@ -97,6 +80,18 @@ async function fetchToken(gatewayUrl) {
 
   const data = await res.json()
   return data.token
+}
+
+/**
+ * Create an authenticated GatewayClient for CLI commands.
+ * Exchanges QUORUM_GITHUB_TOKEN for a Gateway-MCP Token, then injects it.
+ * @returns {Promise<GatewayClient>}
+ */
+async function getCliGatewayClient() {
+  const { gatewayUrl } = resolveGatewayConfig()
+  const jwt = await fetchTokenFromPAT(gatewayUrl)
+  setGatewayToken(jwt)
+  return new GatewayClient(gatewayUrl)
 }
 
 // ── install ───────────────────────────────────────────────────────────────────
@@ -152,7 +147,7 @@ program
       process.exit(1)
     }
 
-    const gw = getCliGatewayClient()
+    const gw = await getCliGatewayClient()
     try {
       const result = await historyHandler(gw, { topic, key, author: 'cli' })
       if (!result) {
@@ -172,7 +167,7 @@ program
   .command('audit verify')
   .description('Verify SHA256 audit chain integrity')
   .action(async () => {
-    const gw = getCliGatewayClient()
+    const gw = await getCliGatewayClient()
     try {
       const entries = await gw.getAllEntries({})
       if (entries.length === 0) {
@@ -215,7 +210,7 @@ program
   .option('--to <date>',   'End date (ISO)')
   .option('--format <fmt>', 'Output format: jsonl (default)', 'jsonl')
   .action(async (opts) => {
-    const gw = getCliGatewayClient()
+    const gw = await getCliGatewayClient()
     try {
       const entries = await gw.getAllEntries({ from: opts.from, to: opts.to })
       for (const entry of entries) {
@@ -233,7 +228,7 @@ program
   .command('audit stats')
   .description('Show audit chain statistics')
   .action(async () => {
-    const gw = getCliGatewayClient()
+    const gw = await getCliGatewayClient()
     try {
       const [count, entries] = await Promise.all([
         gw.countEntries(),
@@ -359,7 +354,7 @@ configCmd
   .description('Show the currently loaded config for your project (fetched from gateway)')
   .action(async () => {
     const { gatewayUrl, projectId } = resolveGatewayConfig()
-    const token = await fetchToken(gatewayUrl)
+    const token = await fetchTokenFromPAT(gatewayUrl)
 
     const res = await fetch(`${gatewayUrl}/config/${encodeURIComponent(projectId)}`, {
       headers: { Authorization: `Bearer ${token}` },
@@ -384,7 +379,7 @@ projectsCmd
   .description('List Quorum projects you are a member of')
   .action(async () => {
     const { gatewayUrl } = resolveGatewayConfig()
-    const token = await fetchToken(gatewayUrl)
+    const token = await fetchTokenFromPAT(gatewayUrl)
 
     const res = await fetch(`${gatewayUrl}/projects`, {
       headers: { Authorization: `Bearer ${token}` },

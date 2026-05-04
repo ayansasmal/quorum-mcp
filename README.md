@@ -78,7 +78,8 @@ export QUORUM_GATEWAY_URL=https://quorum.your-org.internal
 |----------|---------|-------------|
 | `QUORUM_GATEWAY_URL` | `http://localhost:3001` | URL of the Quorum gateway |
 | `QUORUM_AUTHOR` | git email | Identity override — useful in CI contexts |
-| `QUORUM_GITHUB_TOKEN` | — | GitHub PAT for gateway authentication (required for audit/history CLI commands) |
+
+> **Authentication:** the MCP server authenticates via the `authenticate()` tool — it opens your browser to complete the GitHub OAuth flow against the gateway. No env vars needed. The Gateway-MCP Token is stored in-memory only and cleared on MCP restart.
 
 ---
 

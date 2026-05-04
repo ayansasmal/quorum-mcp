@@ -32,7 +32,7 @@ import { validateManifestHasNoDeleteTools } from './governance/constitutional.js
 import { ping as pingGraphiti } from './graph/client.js'
 import { loadConfig, stopConfigPoller } from './config/loader.js'
 import { resolveIdentity } from './identity/resolver.js'
-import { getGatewayClient } from './gateway/client.js'
+import { getGatewayClient, isAuthenticated } from './gateway/client.js'
 import * as authenticate from './tools/authenticate.js'
 
 import * as remember from './tools/remember.js'
@@ -52,9 +52,7 @@ import * as pending from './tools/pending.js'
 // The .quorum project file may also set this before we reach this line.
 process.env.QUORUM_GATEWAY_URL ??= 'http://localhost:3001'
 console.error(`[Quorum] Gateway: ${process.env.QUORUM_GATEWAY_URL}`)
-if (!process.env.QUORUM_GITHUB_TOKEN) {
-  console.error('[Quorum] ℹ  No token at startup — call authenticate() to log in via GitHub OAuth')
-}
+console.error('[Quorum] ℹ  Not authenticated — call authenticate() to log in via GitHub OAuth')
 
 // ── MCP Server ─────────────────────────────────────────────────────────────────
 
@@ -94,15 +92,15 @@ function registerTools(identity) {
         // Resolve at call time — picks up any token injected by authenticate()
         const activePool = getGatewayClient()
 
-        // In gateway mode, if no client exists yet, only authenticate() is allowed
-        if (process.env.QUORUM_GATEWAY_URL && !getGatewayClient() && name !== 'authenticate') {
+        // Gate all tools behind authentication except authenticate() itself
+        if (process.env.QUORUM_GATEWAY_URL && !isAuthenticated() && name !== 'authenticate') {
           return {
             content: [{
               type: 'text',
               text: JSON.stringify({
                 error:   'not_authenticated',
-                message: 'Quorum is in gateway mode but no auth token is available. Call authenticate() first.',
-                hint:    'Ask Claude to run the Quorum OAuth login flow using mcp-playwright.',
+                message: 'Not authenticated with the Quorum gateway. Call authenticate() to log in via GitHub OAuth.',
+                hint:    'authenticate() will open your browser to complete the GitHub OAuth flow.',
               }),
             }],
             isError: true,
