@@ -87,11 +87,18 @@ export QUORUM_GATEWAY_URL=https://quorum.your-org.internal
 The skill teaches Claude Code how to use Quorum automatically — surfacing pending items at session start, recalling context before decisions, and capturing knowledge at task end.
 
 ```bash
-# copy bundled skill to user-level Claude Code skills directory
-cp -r skill/ ~/.claude/skills/quorum/
+npx @as-quorum/mcp install
 ```
 
-Once installed, Claude Code activates it automatically in any project that has a `.quorum` file.
+This copies the bundled skill to `~/.claude/skills/quorum/` and registers the MCP server with `claude mcp add`. Run it once after installing the package.
+
+To skip one step:
+```bash
+npx @as-quorum/mcp install --skip-mcp    # skill only
+npx @as-quorum/mcp install --skip-skill  # MCP registration only
+```
+
+Once installed, Claude Code activates the skill automatically in any project that has a `.quorum` file.
 
 ---
 
