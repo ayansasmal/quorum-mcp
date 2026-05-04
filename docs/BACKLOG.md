@@ -16,6 +16,7 @@
 | BL-03 | `npx quorum start` command | P2 | 🟡 To Do | Blocked on BL-07 (lite compose). `bin` field + npm org already done. |
 | BL-04 | LLM retry in conflict detection | P3 | 🟡 To Do | Retry wrapper on `gw._post('/governance/detect-conflict')` — 3 attempts with backoff. |
 | BL-07 | Graphiti graceful degradation in `graph/client.js` | P5 | 🟡 To Do | `graphitiAvailable` flag — lite compose lives in the `quorum` repo. |
+| BL-10 | MCP OAuth 2.1 client auth flow | P2 | 🟡 To Do | Replace `authenticate()` with standard MCP OAuth 2.1 + PKCE. Blocked on quorum BL-12. |
 | BL-08 | `ingest_pr()` MCP tool | P6 | 🟡 To Do | `dry_run: true` default. GitHub Action deferred to v1.0. |
 | BL-09 | Prompt rendering unit tests | P7 | 🟡 To Do | Pure function tests + manual validation script. No LLM calls in CI. |
 
@@ -166,6 +167,41 @@ deterministic parts (rendering, parsing) — not LLM output quality.
 - [ ] Prompt rendering functions have unit tests
 - [ ] Parser handles malformed LLM output without throwing
 - [ ] Manual validation script exists and is documented in CONTRIBUTING.md
+
+---
+
+### 🟡 BL-10 — MCP OAuth 2.1 client auth flow
+**Files:** `src/gateway/client.js` · `src/tools/authenticate.js` · `src/server.js`
+
+**Blocked on:** quorum repo BL-12 (gateway must implement the OAuth 2.1 Authorization Server first)
+
+Replace the current `authenticate()` tool (which requires a GitHub PAT) with the standard MCP OAuth 2.1 Authorization Code + PKCE flow. After this, zero env vars are needed for auth.
+
+**Flow:**
+1. Any tool call with no token → gateway returns `HTTP 401`
+2. `GatewayClient` detects 401 → discovers `/.well-known/oauth-authorization-server`
+3. Registers dynamically via `POST /oauth/register` → receives `client_id`
+4. Opens browser to `GET /oauth/authorize` with PKCE `code_challenge`
+5. User authenticates with GitHub (inside gateway — MCP never sees GitHub token)
+6. Gateway redirects to MCP's local callback listener with `auth_code`
+7. MCP exchanges `auth_code + code_verifier` via `POST /oauth/token`
+8. Receives Gateway-MCP Token → stored in `_runtimeToken`
+9. All subsequent calls use `Authorization: Bearer <gateway-mcp-token>`
+
+**Changes:**
+- `src/gateway/client.js` — `_getToken()` triggers OAuth 2.1 flow on 401; removes `QUORUM_GITHUB_TOKEN` fallback
+- `src/tools/authenticate.js` — becomes a manual trigger for the same flow (useful when engineer wants to switch project)
+- `src/server.js` — local callback listener for OAuth redirect
+- Remove all `QUORUM_GITHUB_TOKEN` references from codebase and README
+
+**Acceptance criteria:**
+- [ ] Zero env vars needed for MCP auth
+- [ ] `QUORUM_GITHUB_TOKEN` removed from all code and docs
+- [ ] Local callback listener starts on a random available port
+- [ ] PKCE `S256` used — `code_verifier` generated client-side, never sent to gateway until token exchange
+- [ ] Token stored in-memory only — cleared on MCP process restart
+- [ ] `authenticate()` tool triggers re-auth (e.g. to switch project)
+- [ ] Works with Claude Code, Cursor, and any MCP-compliant client
 
 ---
 
