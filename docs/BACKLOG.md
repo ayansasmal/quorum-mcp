@@ -12,7 +12,7 @@
 | ID | Title | Priority | Status | Notes |
 |----|-------|----------|--------|-------|
 | BL-02 | Port `cli.js` to GatewayClient HTTP | P2 | ✅ Done | pg removed. All commands use GatewayClient. `audit lineage` deferred — needs gateway endpoint. |
-| BL-02a | `GET /pg/audit/lineage/:topic/:key` gateway endpoint | P3 | 🟡 To Do | Needed by `quorum audit lineage`. `quorum` repo. |
+| BL-02a | `GET /pg/audit/lineage/:topic/:key` gateway endpoint | P3 | ✅ Done | Added to `gateway/src/routes/pg.js`. Used by `scripts/audit-cli.js lineage`. |
 | BL-03 | `npx quorum start` command | P2 | 🟡 To Do | Blocked on BL-07 (lite compose). `bin` field + npm org already done. |
 | BL-04 | LLM retry in conflict detection | P3 | 🟡 To Do | Retry wrapper on `gw._post('/governance/detect-conflict')` — 3 attempts with backoff. |
 | BL-07 | Graphiti graceful degradation in `graph/client.js` | P5 | 🟡 To Do | `graphitiAvailable` flag — lite compose lives in the `quorum` repo. |
@@ -214,6 +214,9 @@ Replaced the GitHub PAT injection model with the standard MCP OAuth 2.1 Authoriz
 
 | Date | Item | Commit |
 |------|------|--------|
+| 2026-05-06 | Tests migrated from engram monorepo — constitutional + governance + tools | 747eeb6 |
+| 2026-05-06 | BL-02a: `GET /pg/audit/lineage/:topic/:key` added to gateway (engram) | f98a174 |
+| 2026-05-06 | BL-12: OAuth 2.1 Authorization Server in gateway — unblocks BL-10 end-to-end | f98a174 |
 | 2026-05-04 | BL-10: MCP OAuth 2.1 + PKCE flow — full client-side implementation | f37f560 |
 | 2026-05-04 | Remove OPENAI_API_KEY from MCP — conflict/enrich/extract route through gateway | 9066c8f |
 | 2026-05-04 | BL-02: pg removed from cli.js — all commands now use GatewayClient HTTP | 9b6618b |

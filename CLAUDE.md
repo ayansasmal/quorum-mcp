@@ -4,8 +4,8 @@ Published npm package. Engineers install this to connect Claude Code and AI agen
 
 ```bash
 npm install -g @as-quorum/mcp
-# or via repo:
-npm run quorum:install  # from repo root — builds + registers with claude + installs skill
+# or one-step install (registers MCP + copies skill):
+npx @as-quorum/mcp install
 ```
 
 ---
@@ -47,9 +47,10 @@ dist/                     — Compiled output (esbuild, gitignored)
 npm run build:all    # compile src/server.js + cli.js → dist/
 npm run dev          # node --watch src/server.js (uncompiled, for local dev)
 npm run start        # run compiled dist/server.js
+npm test             # run all tests (constitutional + governance + tools)
+npm run test:constitutional  # Layer 1 only (blocking CI gate)
+npm run test:coverage        # with v8 coverage report (80% threshold)
 ```
-
-Tests run from the **repo root** (`npm test`), not from this directory.
 
 ---
 
@@ -61,7 +62,7 @@ Tests run from the **repo root** (`npm test`), not from this directory.
 
 **Identity:** Resolved once per session (from JWT in gateway mode). Never accepted as tool input — server-side only.
 
-**Skill:** Install with `npm run skill:install` from repo root. Installs to `~/.claude/skills/quorum/SKILL.md`.
+**Skill:** Install with `npx @as-quorum/mcp install`. Copies `skill/SKILL.md` to `~/.claude/skills/quorum/SKILL.md` and runs `claude mcp add`.
 
 ---
 
