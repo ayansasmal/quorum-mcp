@@ -32,9 +32,12 @@ src/
   identity/               — resolver.js (4-layer identity chain)
   gateway/
     client.js             — Outbound HTTP client to gateway (NOT the gateway server)
+  install/
+    hooks.js              — Hook script installer: copies hooks/, merges settings.json (idempotent)
   export/                 — markdown.js · confluence.js
   prompts/                — loader.js
-cli.js                    — quorum init / quorum install CLI
+cli.js                    — quorum init / quorum install (--skip-mcp / --skip-skill / --skip-hooks) CLI
+hooks/                    — 5 Claude Code hook scripts (bundled with npm; installed to ~/.claude/hooks/)
 skill/                    — SKILL.md + references/ (bundled with npm package)
 dist/                     — Compiled output (esbuild, gitignored)
 ```
@@ -62,7 +65,7 @@ npm run test:coverage        # with v8 coverage report (80% threshold)
 
 **Identity:** Resolved once per session (from JWT in gateway mode). Never accepted as tool input — server-side only.
 
-**Skill:** Install with `npx @as-quorum/mcp install`. Copies `skill/SKILL.md` to `~/.claude/skills/quorum/SKILL.md` and runs `claude mcp add`.
+**Skill + Hooks:** Install with `npx @as-quorum/mcp install`. Copies `skill/SKILL.md` to `~/.claude/skills/quorum/`, copies `hooks/quorum-*.sh` to `~/.claude/hooks/`, merges hook wiring into `~/.claude/settings.json`, and runs `claude mcp add`. Use `--skip-mcp`, `--skip-skill`, or `--skip-hooks` to skip individual steps. Hooks are self-limiting: each script checks `[ -f ".quorum" ] || exit 0` — silent in any project without a `.quorum` sentinel file.
 
 ---
 
