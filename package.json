@@ -21,7 +21,8 @@
   "files": [
     "dist/",
     "cli.js",
-    "skill/"
+    "skill/",
+    "hooks/"
   ],
   "scripts": {
     "build": "esbuild src/server.js --bundle --platform=node --format=esm --packages=external --outfile=dist/server.js",
