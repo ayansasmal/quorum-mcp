@@ -113,6 +113,7 @@ recall("topic", "key")
 
 If recalled knowledge conflicts with what you are about to write → stop and
 surface the conflict to the human. Do not write first and check later.
+Interpret the recalled response using the signal table in "Reading recalled entries — act on these signals" below.
 This check is non-negotiable for sensitive domains (auth, payments, security,
 infra). For all other files, apply judgment.
 
@@ -563,13 +564,13 @@ one, act on it immediately — before responding to anything else.
 | Signal | Action |
 |--------|--------|
 | `[QUORUM: session_start_required]` | Run full session-start protocol: `pending()` then `search()` for task domains. Touch `.quorum-session` with today's date. Delete `.quorum-reflected` if it exists (stale from prior session). |
-| `[QUORUM: pre-commit]` + staged files | Run capture protocol for the staged files listed. Call `reflect()`. Touch `.quorum-reflected`. |
-| `[QUORUM: task-completed]` | Run single-task knowledge extraction on the completed task description. Batch candidates, present for confirmation. Store approved ones with `remember()`. |
+| `[QUORUM: pre-commit]` + staged files | Check `.quorum-reflected` first — if it exists, skip `reflect()` (already done this session). Otherwise: run capture protocol for the staged files listed, call `reflect()`, touch `.quorum-reflected`. |
+| `[QUORUM: task-completed]` | Run single-task knowledge extraction on the completed task description. Batch candidates, present for confirmation. Store approved ones with `remember()`. Note: this does NOT touch `.quorum-reflected` — `remember()` is targeted extraction, not a full session reflect. The `pre-commit` signal will still call `reflect()` to capture any remaining decisions. |
 | `[QUORUM: knowledge-source-updated]` + file | Run single-file discovery on that file only. Batch candidates, present for confirmation. Do not full-project scan. |
 | `[QUORUM: N file(s) changed — reflect?]` | Offer `reflect()`. If accepted, run it and touch `.quorum-reflected`. |
 
-If Quorum is unreachable when acting on a signal: append a one-line note to
-`.quorum-offline.log` (e.g. `2026-05-06 pre-commit signal — gateway unreachable`)
+If Quorum is unreachable when acting on a signal: append (not overwrite) a one-line note to
+`.quorum-offline.log` using `echo "$(date +%Y-%m-%d) <signal> — gateway unreachable" >> .quorum-offline.log`
 and continue without blocking. Never fail silently.
 
 ---
