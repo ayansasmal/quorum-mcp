@@ -22,6 +22,7 @@ import { fileURLToPath } from 'node:url'
 import { createInterface } from 'node:readline'
 import { spawnSync } from 'node:child_process'
 import { homedir } from 'node:os'
+import { installHooks } from './src/install/hooks.js'
 import { GatewayClient, setGatewayToken } from './src/gateway/client.js'
 import { verifyChain } from './src/audit/chain.js'
 import { handler as historyHandler } from './src/tools/history.js'
@@ -101,6 +102,7 @@ program
   .description('Install the Quorum skill and register the MCP server with Claude Code')
   .option('--skip-mcp',   'Skip claude mcp add registration')
   .option('--skip-skill', 'Skip skill installation')
+  .option('--skip-hooks', 'Skip Claude Code hook installation')
   .action(async (opts) => {
     if (!opts.skipSkill) {
       const skillSrc  = join(__dirname, 'skill')
@@ -111,6 +113,20 @@ program
         console.log(`✓ Skill installed → ${skillDest}`)
       } catch (err) {
         console.error(`✗ Skill install failed: ${err.message}`)
+        process.exit(1)
+      }
+    }
+
+    if (!opts.skipHooks) {
+      const hooksDir     = join(homedir(), '.claude', 'hooks')
+      const settingsPath = join(homedir(), '.claude', 'settings.json')
+      const scriptsSrc   = join(__dirname, 'hooks')
+      try {
+        installHooks({ hooksDir, settingsPath, scriptsSrc })
+        console.log(`✓ Hooks installed → ${hooksDir}`)
+        console.log(`✓ Hook wiring merged → ${settingsPath}`)
+      } catch (err) {
+        console.error(`✗ Hook install failed: ${err.message}`)
         process.exit(1)
       }
     }
