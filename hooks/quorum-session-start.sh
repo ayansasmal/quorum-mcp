@@ -8,4 +8,4 @@ if [ -f ".quorum-session" ]; then
 fi
 echo "$TODAY" > .quorum-session
 echo "[QUORUM: session_start_required]"
-echo "Project: $(head -1 .quorum 2>/dev/null)"
+echo "Project: $(head -1 ".quorum" 2>/dev/null || echo 'unknown')"
