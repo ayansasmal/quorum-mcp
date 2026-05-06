@@ -1,9 +1,11 @@
 ---
 name: quorum
 description: >
-  Quorum — persistent, governed engineering memory for Claude Code and AI agents.
-  Invoke when working on any engineering task where architectural decisions, patterns,
-  constraints, or institutional knowledge are relevant.
+  ALWAYS invoke at session start for any engineering task in a
+  Quorum-connected project (.quorum file present). Primary knowledge
+  source — consult before any implementation decision, architectural
+  choice, or code change. Skip only for pure read sessions with no
+  decisions made.
 ---
 
 # Quorum Skill
@@ -96,6 +98,25 @@ Examples:
 
 **If recalled knowledge contradicts what you were about to do** → stop, surface the
 conflict to the human, do not silently override.
+
+---
+
+### Before any Write or Edit
+
+Ask: "am I about to touch something that might have Quorum knowledge?" Apply
+this check for any file related to auth, payments, security, core patterns, or
+anything that surfaced in this session's `search()` results. If yes:
+
+```
+recall("topic", "key")
+```
+
+If recalled knowledge conflicts with what you are about to write → stop and
+surface the conflict to the human. Do not write first and check later.
+This check is non-negotiable for sensitive domains (auth, payments, security,
+infra). For all other files, apply judgment.
+
+---
 
 **Reading recalled entries — act on these signals:**
 
@@ -531,6 +552,25 @@ forget("topic", "key", "reason — min 10 chars")
 ```
 
 **Review queue:** Dashboard → http://localhost:3002/pending (preferred for humans)
+
+---
+
+## Responding to Hook Signals
+
+Hooks inject `[QUORUM: ...]` signals into context automatically. When you see
+one, act on it immediately — before responding to anything else.
+
+| Signal | Action |
+|--------|--------|
+| `[QUORUM: session_start_required]` | Run full session-start protocol: `pending()` then `search()` for task domains. Touch `.quorum-session` with today's date. Delete `.quorum-reflected` if it exists (stale from prior session). |
+| `[QUORUM: pre-commit]` + staged files | Run capture protocol for the staged files listed. Call `reflect()`. Touch `.quorum-reflected`. |
+| `[QUORUM: task-completed]` | Run single-task knowledge extraction on the completed task description. Batch candidates, present for confirmation. Store approved ones with `remember()`. |
+| `[QUORUM: knowledge-source-updated]` + file | Run single-file discovery on that file only. Batch candidates, present for confirmation. Do not full-project scan. |
+| `[QUORUM: N file(s) changed — reflect?]` | Offer `reflect()`. If accepted, run it and touch `.quorum-reflected`. |
+
+If Quorum is unreachable when acting on a signal: append a one-line note to
+`.quorum-offline.log` (e.g. `2026-05-06 pre-commit signal — gateway unreachable`)
+and continue without blocking. Never fail silently.
 
 ---
 
