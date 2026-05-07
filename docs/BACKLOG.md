@@ -14,9 +14,9 @@
 | BL-02 | Port `cli.js` to GatewayClient HTTP | P2 | ✅ Done | pg removed. All commands use GatewayClient. `audit lineage` deferred — needs gateway endpoint. |
 | BL-02a | `GET /pg/audit/lineage/:topic/:key` gateway endpoint | P3 | ✅ Done | Added to `gateway/src/routes/pg.js`. Used by `scripts/audit-cli.js lineage`. |
 | BL-03 | `npx quorum start` command | P2 | 🟡 To Do | Blocked on BL-07 (lite compose). `bin` field + npm org already done. |
-| BL-04 | LLM retry in conflict detection | P3 | 🟡 To Do | Retry wrapper on `gw._post('/governance/detect-conflict')` — 3 attempts with backoff. |
+| BL-04 | LLM retry + `reflect()` fallback | P3 | 🟡 To Do | Retry wrapper on gateway governance calls (3 attempts, backoff) + `reflect()` fallback when extraction returns []. Startup env check dropped — OPENAI_API_KEY removed from MCP. |
 | BL-07 | Graphiti graceful degradation in `graph/client.js` | P5 | 🟡 To Do | `graphitiAvailable` flag — lite compose lives in the `quorum` repo. |
-| BL-10 | MCP OAuth 2.1 client auth flow | P2 | ✅ Done | Full PKCE flow in authenticate.js. Graceful degradation when BL-12 not live. |
+| BL-10 | MCP OAuth 2.1 client auth flow | P2 | ✅ Done | Full PKCE flow in authenticate.js. Gateway BL-12 also ✅ Done — full OAuth round-trip live. |
 | BL-08 | `ingest_pr()` MCP tool | P6 | 🟡 To Do | `dry_run: true` default. GitHub Action deferred to v1.0. |
 | BL-09 | Prompt rendering unit tests | P7 | 🟡 To Do | Pure function tests + manual validation script. No LLM calls in CI. |
 | BL-13 | SDLC hooks + SKILL.md enforcement | P2 | ✅ Done | 5 hook scripts + `src/install/hooks.js` + `quorum install --skip-hooks`. SKILL.md updated with "ALWAYS invoke", hook signal table, pull-side recall gate. |
@@ -73,33 +73,29 @@ program
 
 ---
 
-### 🟡 BL-04 — LLM retry + `reflect()` fallback + startup check
-**Files:** `src/governance/conflict.js` · `src/tools/reflect.js` · `src/server.js`
+### 🟡 BL-04 — LLM retry + `reflect()` fallback
+**Files:** `src/governance/conflict.js` · `src/tools/reflect.js`
 
-Three independent changes, one commit:
+> **Scope updated 2026-05-07:** `OPENAI_API_KEY` removed from MCP (9066c8f). All LLM calls
+> route through gateway HTTP (`/governance/*`). Startup env check no longer applicable.
+
+Two independent changes, one commit:
 
 **1. Retry wrapper** (`conflict.js`)
-Wrap `callLLM()` with 3-attempt exponential backoff (200ms → 400ms → 800ms).
-Covers all three call sites: contradiction check, enrichment, extraction.
+Wrap `gw._post('/governance/detect-conflict')` (and `/governance/enrich`, `/governance/extract`)
+with 3-attempt exponential backoff (200ms → 400ms → 800ms). Covers all three governance call sites.
 
 **2. `reflect()` fallback** (`reflect.js`)
-When `extractKnowledge()` returns `[]` (missing API key or LLM error), store the raw
+When `extractKnowledge()` returns `[]` (gateway unavailable or extraction error), store the raw
 task summary as a single DRAFT observation:
 ```js
 { confidence: 0.35, entity_type: 'observation', content: taskSummary, tags: ['unextracted'] }
 ```
 The `unextracted` tag makes it easy to find and re-process later.
 
-**3. Startup env check** (`src/server.js`, 1 line)
-```js
-if (!process.env.OPENAI_API_KEY)
-  console.error('[Quorum] WARNING: OPENAI_API_KEY not set — LLM features disabled')
-```
-
 **Acceptance criteria:**
-- [ ] Transient LLM 500s are retried up to 3 times with backoff
-- [ ] `reflect()` always stores something even without LLM
-- [ ] Missing API key is logged at startup, not silently swallowed
+- [ ] Transient gateway errors on governance endpoints retried up to 3 times with backoff
+- [ ] `reflect()` always stores something even when gateway extraction fails
 
 ---
 
@@ -245,6 +241,7 @@ All hooks guard with `[ -f ".quorum" ] || exit 0` — self-limiting, silent in n
 
 | Date | Item | Commit |
 |------|------|--------|
+| 2026-05-07 | BL-04 scope narrowed — OPENAI_API_KEY removed; startup env check dropped; retry now on gateway calls | (backlog) |
 | 2026-05-06 | BL-13: SDLC hooks — 5 hook scripts, hooks.js installer, SKILL.md enforcement | feat/sdlc-hooks |
 | 2026-05-06 | Tests migrated from engram monorepo — constitutional + governance + tools | 747eeb6 |
 | 2026-05-06 | BL-02a: `GET /pg/audit/lineage/:topic/:key` added to gateway (engram) | f98a174 |
