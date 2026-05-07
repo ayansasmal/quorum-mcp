@@ -13,7 +13,6 @@
 |----|-------|----------|--------|-------|
 | BL-02 | Port `cli.js` to GatewayClient HTTP | P2 | ✅ Done | pg removed. All commands use GatewayClient. `audit lineage` deferred — needs gateway endpoint. |
 | BL-02a | `GET /pg/audit/lineage/:topic/:key` gateway endpoint | P3 | ✅ Done | Added to `gateway/src/routes/pg.js`. Used by `scripts/audit-cli.js lineage`. |
-| BL-03 | `npx quorum start` command | P2 | 🟡 To Do | Blocked on BL-07 (lite compose). `bin` field + npm org already done. |
 | BL-04 | LLM retry + `reflect()` fallback | P3 | 🟡 To Do | Retry wrapper on gateway governance calls (3 attempts, backoff) + `reflect()` fallback when extraction returns []. Startup env check dropped — OPENAI_API_KEY removed from MCP. |
 | BL-07 | Graphiti graceful degradation in `graph/client.js` | P5 | 🟡 To Do | `graphitiAvailable` flag — lite compose lives in the `quorum` repo. |
 | BL-10 | MCP OAuth 2.1 client auth flow | P2 | ✅ Done | Full PKCE flow in authenticate.js. Gateway BL-12 also ✅ Done — full OAuth round-trip live. |
@@ -45,31 +44,6 @@ Use `getGatewayClient()` after loading `.quorum` file defaults at CLI startup.
 - [ ] `import pg from 'pg'` removed from `cli.js`
 - [ ] All commands work via gateway HTTP
 - [ ] `grep -r "from 'pg'" .` returns no output
-
----
-
-### 🟡 BL-03 — `npx quorum start` command
-**File:** `cli.js`
-
-Foundation already done: `bin.quorum = ./dist/cli.js` in `package.json`, npm org `as-quorum` created, `quorum init` works.
-
-Missing: the `start` subcommand that launches the lite Docker stack (defined in `quorum` repo).
-
-```js
-program
-  .command('start')
-  .description('Start the Quorum local stack (lite mode — no Graphiti)')
-  .action(() => {
-    // spawn docker compose -f <bundled lite compose> up -d
-  })
-```
-
-**Blocked on:** BL-07 (lite compose must exist in `quorum` repo first)
-
-**Acceptance criteria:**
-- [ ] `npx quorum start` pulls and starts the lite stack
-- [ ] `npx quorum stop` brings it down
-- [ ] README updated with one-liner install
 
 ---
 
@@ -241,6 +215,7 @@ All hooks guard with `[ -f ".quorum" ] || exit 0` — self-limiting, silent in n
 
 | Date | Item | Commit |
 |------|------|--------|
+| 2026-05-07 | BL-03 dropped: platform team deploys Quorum centrally; engineers connect from local Claude Code — no local stack CLI needed | (backlog) |
 | 2026-05-07 | BL-04 scope narrowed — OPENAI_API_KEY removed; startup env check dropped; retry now on gateway calls | (backlog) |
 | 2026-05-06 | BL-13: SDLC hooks — 5 hook scripts, hooks.js installer, SKILL.md enforcement | feat/sdlc-hooks |
 | 2026-05-06 | Tests migrated from engram monorepo — constitutional + governance + tools | 747eeb6 |
