@@ -29,6 +29,8 @@ import { handler as historyHandler } from './src/tools/history.js'
 import { findQuorumFile, loadQuorumFile, suggestProjectId } from './src/quorum-file.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
+// Works from both package root (dev: node cli.js) and dist/ (installed: dist/cli.js)
+const pkgRoot = existsSync(join(__dirname, 'skill')) ? __dirname : join(__dirname, '..')
 
 // ── Gateway helpers ────────────────────────────────────────────────────────────
 
@@ -105,7 +107,7 @@ program
   .option('--skip-hooks', 'Skip Claude Code hook installation')
   .action(async (opts) => {
     if (!opts.skipSkill) {
-      const skillSrc  = join(__dirname, 'skill')
+      const skillSrc  = join(pkgRoot, 'skill')
       const skillDest = join(homedir(), '.claude', 'skills', 'quorum')
       try {
         mkdirSync(join(homedir(), '.claude', 'skills'), { recursive: true })
@@ -120,7 +122,7 @@ program
     if (!opts.skipHooks) {
       const hooksDir     = join(homedir(), '.claude', 'hooks')
       const settingsPath = join(homedir(), '.claude', 'settings.json')
-      const scriptsSrc   = join(__dirname, 'hooks')
+      const scriptsSrc   = join(pkgRoot, 'hooks')
       try {
         installHooks({ hooksDir, settingsPath, scriptsSrc })
         console.log(`✓ Hooks installed → ${hooksDir}`)
