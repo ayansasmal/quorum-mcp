@@ -22,12 +22,15 @@ import { fileURLToPath } from 'node:url'
 import { createInterface } from 'node:readline'
 import { spawnSync } from 'node:child_process'
 import { homedir } from 'node:os'
+import { installHooks } from './src/install/hooks.js'
 import { GatewayClient, setGatewayToken } from './src/gateway/client.js'
 import { verifyChain } from './src/audit/chain.js'
 import { handler as historyHandler } from './src/tools/history.js'
 import { findQuorumFile, loadQuorumFile, suggestProjectId } from './src/quorum-file.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
+// Works from both package root (dev: node cli.js) and dist/ (installed: dist/cli.js)
+const pkgRoot = existsSync(join(__dirname, 'skill')) ? __dirname : join(__dirname, '..')
 
 // ── Gateway helpers ────────────────────────────────────────────────────────────
 
@@ -101,9 +104,10 @@ program
   .description('Install the Quorum skill and register the MCP server with Claude Code')
   .option('--skip-mcp',   'Skip claude mcp add registration')
   .option('--skip-skill', 'Skip skill installation')
+  .option('--skip-hooks', 'Skip Claude Code hook installation')
   .action(async (opts) => {
     if (!opts.skipSkill) {
-      const skillSrc  = join(__dirname, 'skill')
+      const skillSrc  = join(pkgRoot, 'skill')
       const skillDest = join(homedir(), '.claude', 'skills', 'quorum')
       try {
         mkdirSync(join(homedir(), '.claude', 'skills'), { recursive: true })
@@ -111,6 +115,20 @@ program
         console.log(`✓ Skill installed → ${skillDest}`)
       } catch (err) {
         console.error(`✗ Skill install failed: ${err.message}`)
+        process.exit(1)
+      }
+    }
+
+    if (!opts.skipHooks) {
+      const hooksDir     = join(homedir(), '.claude', 'hooks')
+      const settingsPath = join(homedir(), '.claude', 'settings.json')
+      const scriptsSrc   = join(pkgRoot, 'hooks')
+      try {
+        installHooks({ hooksDir, settingsPath, scriptsSrc })
+        console.log(`✓ Hooks installed → ${hooksDir}`)
+        console.log(`✓ Hook wiring merged → ${settingsPath}`)
+      } catch (err) {
+        console.error(`✗ Hook install failed: ${err.message}`)
         process.exit(1)
       }
     }
@@ -161,10 +179,16 @@ program
     }
   })
 
+// ── audit ─────────────────────────────────────────────────────────────────────
+
+const audit = program
+  .command('audit')
+  .description('Audit chain commands')
+
 // ── audit verify ──────────────────────────────────────────────────────────────
 
-program
-  .command('audit verify')
+audit
+  .command('verify')
   .description('Verify SHA256 audit chain integrity')
   .action(async () => {
     const gw = await getCliGatewayClient()
@@ -190,21 +214,21 @@ program
 
 // ── audit lineage ─────────────────────────────────────────────────────────────
 
-program
-  .command('audit lineage <topicKey>')
+audit
+  .command('lineage <topicKey>')
   .description('Show full audit lineage for a knowledge node')
   .action(async () => {
-    // Requires a gateway endpoint (GET /pg/audit/lineage/:topic/:key) not yet implemented.
+    // Requires GET /pg/audit/lineage/:topic/:key on the gateway (BL-02a done).
     // Use the dashboard Audit Timeline at http://localhost:3002/audit in the meantime.
-    console.error('audit lineage is not yet available via the gateway.')
+    console.error('audit lineage is not yet available via the CLI.')
     console.error('Use the Audit Timeline in the dashboard: http://localhost:3002/audit')
     process.exit(1)
   })
 
 // ── audit export ──────────────────────────────────────────────────────────────
 
-program
-  .command('audit export')
+audit
+  .command('export')
   .description('Export audit log as JSONL')
   .option('--from <date>', 'Start date (ISO)')
   .option('--to <date>',   'End date (ISO)')
@@ -224,8 +248,8 @@ program
 
 // ── audit stats ───────────────────────────────────────────────────────────────
 
-program
-  .command('audit stats')
+audit
+  .command('stats')
   .description('Show audit chain statistics')
   .action(async () => {
     const gw = await getCliGatewayClient()

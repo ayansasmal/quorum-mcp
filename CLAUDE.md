@@ -4,8 +4,8 @@ Published npm package. Engineers install this to connect Claude Code and AI agen
 
 ```bash
 npm install -g @as-quorum/mcp
-# or via repo:
-npm run quorum:install  # from repo root — builds + registers with claude + installs skill
+# or one-step install (registers MCP + copies skill):
+npx @as-quorum/mcp install
 ```
 
 ---
@@ -32,9 +32,12 @@ src/
   identity/               — resolver.js (4-layer identity chain)
   gateway/
     client.js             — Outbound HTTP client to gateway (NOT the gateway server)
+  install/
+    hooks.js              — Hook script installer: copies hooks/, merges settings.json (idempotent)
   export/                 — markdown.js · confluence.js
   prompts/                — loader.js
-cli.js                    — quorum init / quorum install CLI
+cli.js                    — quorum init / quorum install (--skip-mcp / --skip-skill / --skip-hooks) CLI
+hooks/                    — 5 Claude Code hook scripts (bundled with npm; installed to ~/.claude/hooks/)
 skill/                    — SKILL.md + references/ (bundled with npm package)
 dist/                     — Compiled output (esbuild, gitignored)
 ```
@@ -47,9 +50,10 @@ dist/                     — Compiled output (esbuild, gitignored)
 npm run build:all    # compile src/server.js + cli.js → dist/
 npm run dev          # node --watch src/server.js (uncompiled, for local dev)
 npm run start        # run compiled dist/server.js
+npm test             # run all tests (constitutional + governance + tools)
+npm run test:constitutional  # Layer 1 only (blocking CI gate)
+npm run test:coverage        # with v8 coverage report (80% threshold)
 ```
-
-Tests run from the **repo root** (`npm test`), not from this directory.
 
 ---
 
@@ -61,7 +65,7 @@ Tests run from the **repo root** (`npm test`), not from this directory.
 
 **Identity:** Resolved once per session (from JWT in gateway mode). Never accepted as tool input — server-side only.
 
-**Skill:** Install with `npm run skill:install` from repo root. Installs to `~/.claude/skills/quorum/SKILL.md`.
+**Skill + Hooks:** Install with `npx @as-quorum/mcp install`. Copies `skill/SKILL.md` to `~/.claude/skills/quorum/`, copies `hooks/quorum-*.sh` to `~/.claude/hooks/`, merges hook wiring into `~/.claude/settings.json`, and runs `claude mcp add`. Use `--skip-mcp`, `--skip-skill`, or `--skip-hooks` to skip individual steps. Hooks are self-limiting: each script checks `[ -f ".quorum" ] || exit 0` — silent in any project without a `.quorum` sentinel file.
 
 ---
 

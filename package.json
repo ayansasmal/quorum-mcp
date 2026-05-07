@@ -14,13 +14,15 @@
     "./graph/queries": "./src/graph/queries.js",
     "./graph/client": "./src/graph/client.js",
     "./audit/secondary": "./src/audit/secondary.js",
+    "./audit/chain": "./src/audit/chain.js",
     "./governance/constitutional": "./src/governance/constitutional.js",
     ".": "./dist/server.js"
   },
   "files": [
     "dist/",
     "cli.js",
-    "skill/"
+    "skill/",
+    "hooks/"
   ],
   "scripts": {
     "build": "esbuild src/server.js --bundle --platform=node --format=esm --packages=external --outfile=dist/server.js",
@@ -28,6 +30,10 @@
     "build:all": "npm run build && npm run build:cli",
     "dev": "node --watch src/server.js",
     "start": "node dist/server.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:constitutional": "vitest run tests/constitutional",
+    "test:coverage": "vitest run --coverage",
     "prepublishOnly": "npm run build:all"
   },
   "dependencies": {
@@ -37,6 +43,8 @@
     "zod": "4.3.6"
   },
   "devDependencies": {
-    "esbuild": "^0.25.0"
+    "@vitest/coverage-v8": "4.1.2",
+    "esbuild": "^0.25.0",
+    "vitest": "4.1.2"
   }
 }

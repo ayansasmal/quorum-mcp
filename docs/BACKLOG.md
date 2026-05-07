@@ -12,13 +12,14 @@
 | ID | Title | Priority | Status | Notes |
 |----|-------|----------|--------|-------|
 | BL-02 | Port `cli.js` to GatewayClient HTTP | P2 | ✅ Done | pg removed. All commands use GatewayClient. `audit lineage` deferred — needs gateway endpoint. |
-| BL-02a | `GET /pg/audit/lineage/:topic/:key` gateway endpoint | P3 | 🟡 To Do | Needed by `quorum audit lineage`. `quorum` repo. |
+| BL-02a | `GET /pg/audit/lineage/:topic/:key` gateway endpoint | P3 | ✅ Done | Added to `gateway/src/routes/pg.js`. Used by `scripts/audit-cli.js lineage`. |
 | BL-03 | `npx quorum start` command | P2 | 🟡 To Do | Blocked on BL-07 (lite compose). `bin` field + npm org already done. |
 | BL-04 | LLM retry in conflict detection | P3 | 🟡 To Do | Retry wrapper on `gw._post('/governance/detect-conflict')` — 3 attempts with backoff. |
 | BL-07 | Graphiti graceful degradation in `graph/client.js` | P5 | 🟡 To Do | `graphitiAvailable` flag — lite compose lives in the `quorum` repo. |
 | BL-10 | MCP OAuth 2.1 client auth flow | P2 | ✅ Done | Full PKCE flow in authenticate.js. Graceful degradation when BL-12 not live. |
 | BL-08 | `ingest_pr()` MCP tool | P6 | 🟡 To Do | `dry_run: true` default. GitHub Action deferred to v1.0. |
 | BL-09 | Prompt rendering unit tests | P7 | 🟡 To Do | Pure function tests + manual validation script. No LLM calls in CI. |
+| BL-13 | SDLC hooks + SKILL.md enforcement | P2 | ✅ Done | 5 hook scripts + `src/install/hooks.js` + `quorum install --skip-hooks`. SKILL.md updated with "ALWAYS invoke", hook signal table, pull-side recall gate. |
 
 ---
 
@@ -201,6 +202,36 @@ Replaced the GitHub PAT injection model with the standard MCP OAuth 2.1 Authoriz
 
 ---
 
+### ✅ BL-13 — SDLC hooks + SKILL.md enforcement
+**Files:** `hooks/quorum-*.sh` · `src/install/hooks.js` · `tests/install/hooks.test.js` · `skill/SKILL.md` · `cli.js` · `package.json`
+
+5 Claude Code hooks that make Quorum an always-present part of the engineering SDLC:
+
+| Hook | Event | Signal |
+|------|-------|--------|
+| `quorum-session-start.sh` | `UserPromptSubmit` | `[QUORUM: session_start_required]` — once per calendar day per project |
+| `quorum-stop.sh` | `Stop` | `[QUORUM: N file(s) changed — reflect?]` — when ≥3 files changed and reflect not done |
+| `quorum-pre-commit.sh` | `PreToolUse: Bash` | `[QUORUM: pre-commit]` + staged file list |
+| `quorum-task-complete.sh` | `PostToolUse: TodoWrite` | `[QUORUM: task-completed]` — when a task status becomes "completed" |
+| `quorum-knowledge-source.sh` | `PostToolUse: Write/Edit` | `[QUORUM: knowledge-source-updated]` — memory files and CLAUDE.md only |
+
+All hooks guard with `[ -f ".quorum" ] || exit 0` — self-limiting, silent in non-connected projects.
+
+`src/install/hooks.js` — idempotent installer: copies scripts to `hooksDir`, merges hook wiring into `settings.json` without destroying existing entries. Fail-fast on missing scripts and corrupt settings.json.
+
+`skill/SKILL.md` updated: "ALWAYS invoke" frontmatter, hook signal response table, pull-side `recall()` gate before Write/Edit on sensitive domains.
+
+`quorum install` extended with `--skip-hooks` flag.
+
+**Acceptance criteria:**
+- [x] All 5 hooks installed to `~/.claude/hooks/` by `quorum install`
+- [x] Re-install is idempotent (no duplicate settings.json entries)
+- [x] Hooks silent in projects without `.quorum` sentinel file
+- [x] SKILL.md has hook signal table and pull-side protocol
+- [x] 13 unit tests in `tests/install/hooks.test.js` (186 total passing)
+
+---
+
 ## Deferred to v1.0
 
 | Item | Reason |
@@ -214,6 +245,10 @@ Replaced the GitHub PAT injection model with the standard MCP OAuth 2.1 Authoriz
 
 | Date | Item | Commit |
 |------|------|--------|
+| 2026-05-06 | BL-13: SDLC hooks — 5 hook scripts, hooks.js installer, SKILL.md enforcement | feat/sdlc-hooks |
+| 2026-05-06 | Tests migrated from engram monorepo — constitutional + governance + tools | 747eeb6 |
+| 2026-05-06 | BL-02a: `GET /pg/audit/lineage/:topic/:key` added to gateway (engram) | f98a174 |
+| 2026-05-06 | BL-12: OAuth 2.1 Authorization Server in gateway — unblocks BL-10 end-to-end | f98a174 |
 | 2026-05-04 | BL-10: MCP OAuth 2.1 + PKCE flow — full client-side implementation | f37f560 |
 | 2026-05-04 | Remove OPENAI_API_KEY from MCP — conflict/enrich/extract route through gateway | 9066c8f |
 | 2026-05-04 | BL-02: pg removed from cli.js — all commands now use GatewayClient HTTP | 9b6618b |

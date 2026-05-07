@@ -14,3 +14,10 @@ logs/
 
 .claude/
 .claire/
+
+.worktrees/
+
+# Quorum session state (project-local, per-engineer)
+.quorum-session
+.quorum-reflected
+.quorum-offline.log

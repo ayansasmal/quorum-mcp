@@ -83,23 +83,31 @@ export QUORUM_GATEWAY_URL=https://quorum.your-org.internal
 
 ---
 
-## Install the Quorum skill
+## Install the Quorum skill and hooks
 
-The skill teaches Claude Code how to use Quorum automatically — surfacing pending items at session start, recalling context before decisions, and capturing knowledge at task end.
+The skill and hooks make Quorum an always-present part of your engineering SDLC — surfacing pending items at session start, recalling context before decisions, capturing knowledge at task end, and prompting `reflect()` before commits.
 
 ```bash
 npx @as-quorum/mcp install
 ```
 
-This copies the bundled skill to `~/.claude/skills/quorum/` and registers the MCP server with `claude mcp add`. Run it once after installing the package.
+This installs three things:
+1. Copies the bundled skill to `~/.claude/skills/quorum/`
+2. Copies 5 Claude Code hook scripts to `~/.claude/hooks/` and wires them into `~/.claude/settings.json`
+3. Registers the MCP server with `claude mcp add`
 
-To skip one step:
+To skip individual steps:
 ```bash
-npx @as-quorum/mcp install --skip-mcp    # skill only
-npx @as-quorum/mcp install --skip-skill  # MCP registration only
+npx @as-quorum/mcp install --skip-mcp    # skill + hooks only
+npx @as-quorum/mcp install --skip-skill  # hooks + MCP registration only
+npx @as-quorum/mcp install --skip-hooks  # skill + MCP registration only
 ```
 
-Once installed, Claude Code activates the skill automatically in any project that has a `.quorum` file.
+**Activating hooks in a project:** create a `.quorum` file in the project root with the project name on line 1. Hooks are self-limiting — they are silent in any directory without this file.
+
+```bash
+echo "my-project" > .quorum
+```
 
 ---
 
@@ -117,8 +125,11 @@ src/
   identity/           — resolver.js (4-layer identity chain)
   gateway/
     client.js         — Outbound HTTP client to gateway
+  install/
+    hooks.js          — Hook script installer (copies scripts, merges settings.json)
   prompts/            — LLM prompt templates (editable Markdown)
 cli.js                — quorum CLI (init, install, audit, history)
+hooks/                — 5 Claude Code hook scripts (bundled with npm)
 skill/                — SKILL.md + references/ (bundled with npm)
 dist/                 — Compiled output (esbuild, gitignored)
 ```
