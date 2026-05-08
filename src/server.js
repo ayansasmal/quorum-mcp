@@ -173,12 +173,17 @@ async function startup() {
   }
 
   // 4. Resolve caller identity — once per session, injected into all tool calls
-  // Identity comes from the JWT (verified by the gateway).
-  // Falls back to local resolution if not yet authenticated.
+  // Attempts gateway identity (JWT-verified) first; falls back to local resolution
+  // if not yet authenticated so the server can start without a valid session.
   const activeGatewayClient = getGatewayClient()
-  const identity = activeGatewayClient
-    ? await activeGatewayClient.getIdentity()
-    : await resolveIdentity()
+  let identity
+  try {
+    identity = activeGatewayClient
+      ? await activeGatewayClient.getIdentity()
+      : await resolveIdentity()
+  } catch {
+    identity = await resolveIdentity()
+  }
   console.error(`[Quorum] ✓ Identity resolved: ${identity.name} (method: ${identity.method}, role: ${identity.role ?? 'none'})`)
 
   // 5. Validate MCP manifest has no delete-capable tools
