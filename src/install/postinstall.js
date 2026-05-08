@@ -5,8 +5,8 @@
  * Copies skill/ and hooks/ to ~/.claude, merges hook wiring into settings.json,
  * and registers the MCP server under mcpServers in settings.json.
  *
- * Only runs for global installs. Exits 0 in all error cases so npm install
- * never fails due to a Claude Code setup issue.
+ * Exits 0 in all error cases so npm install never fails due to a Claude Code
+ * setup issue.
  */
 
 import { readFileSync, writeFileSync, cpSync, mkdirSync, existsSync } from 'node:fs'
@@ -23,15 +23,6 @@ const pkgRoot = existsSync(join(__dirname, 'skill'))
   : existsSync(join(__dirname, '..', 'skill'))
     ? join(__dirname, '..')
     : join(__dirname, '..', '..')
-
-/**
- * Guards against running during local `npm install` in the dev repo.
- * npm sets npm_config_global=true only for `npm install -g`.
- * @returns {boolean}
- */
-function isGlobalInstall() {
-  return process.env.npm_config_global === 'true'
-}
 
 /**
  * Merges the Quorum MCP server entry into the mcpServers section of settings.json.
@@ -63,11 +54,6 @@ export function registerMcpServer(settingsPath, serverPath) {
 }
 
 async function main() {
-  if (!isGlobalInstall()) {
-    // Silent exit — local dev install, nothing to do
-    process.exit(0)
-  }
-
   const claudeDir    = join(homedir(), '.claude')
   const hooksDir     = join(claudeDir, 'hooks')
   const settingsPath = join(claudeDir, 'settings.json')
