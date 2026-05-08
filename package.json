@@ -21,15 +21,18 @@
   "files": [
     "dist/",
     "cli.js",
+    "postinstall.js",
     "skill/",
     "hooks/"
   ],
   "scripts": {
     "build": "esbuild src/server.js --bundle --platform=node --format=esm --packages=external --outfile=dist/server.js",
     "build:cli": "esbuild cli.js --bundle --platform=node --format=esm --packages=external --outfile=dist/cli.js",
-    "build:all": "npm run build && npm run build:cli",
+    "build:postinstall": "esbuild src/install/postinstall.js --bundle --platform=node --format=esm --packages=external --outfile=dist/postinstall.js",
+    "build:all": "npm run build && npm run build:cli && npm run build:postinstall",
     "dev": "node --watch src/server.js",
     "start": "node dist/server.js",
+    "postinstall": "node postinstall.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:constitutional": "vitest run tests/constitutional",

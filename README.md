@@ -35,16 +35,19 @@ The MCP server exposes 10 tools to Claude Code. All persistence goes through the
 ## Connect to Claude Code
 
 ```bash
-claude mcp add quorum -- npx -y @as-quorum/mcp
+npm install -g @as-quorum/mcp
 ```
 
-Or if running locally from source:
+That's it. The `postinstall` script automatically:
+- Copies the skill to `~/.claude/skills/quorum/`
+- Installs the 5 hook scripts to `~/.claude/hooks/`
+- Wires hook entries into `~/.claude/settings.json`
+- Registers the MCP server under `mcpServers.quorum` in `~/.claude/settings.json`
+
+If anything went wrong (or to re-run manually):
 
 ```bash
-# from this repo root
-npm install
-npm run build:all
-claude mcp add quorum -- node /path/to/quorum-mcp/dist/server.js
+quorum install
 ```
 
 Set the gateway URL if it's not on `localhost:3001`:
@@ -52,6 +55,12 @@ Set the gateway URL if it's not on `localhost:3001`:
 ```bash
 export QUORUM_GATEWAY_URL=https://quorum.your-org.internal
 ```
+
+Then connect a project:
+
+```bash
+cd your-project
+quorum init
 
 ---
 
@@ -127,8 +136,10 @@ src/
     client.js         — Outbound HTTP client to gateway
   install/
     hooks.js          — Hook script installer (copies scripts, merges settings.json)
+    postinstall.js    — npm postinstall entry point (global-install guard + MCP registration)
   prompts/            — LLM prompt templates (editable Markdown)
 cli.js                — quorum CLI (init, install, audit, history)
+postinstall.js        — thin wrapper: delegates to dist/postinstall.js, no-ops if not yet built
 hooks/                — 5 Claude Code hook scripts (bundled with npm)
 skill/                — SKILL.md + references/ (bundled with npm)
 dist/                 — Compiled output (esbuild, gitignored)
@@ -141,7 +152,7 @@ dist/                 — Compiled output (esbuild, gitignored)
 ```bash
 npm install
 npm run dev          # node --watch src/server.js (no build step)
-npm run build:all    # compile server + CLI → dist/
+npm run build:all    # compile server + CLI + postinstall → dist/
 npm test             # constitutional + governance tests
 ```
 
