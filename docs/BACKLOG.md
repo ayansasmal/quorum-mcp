@@ -14,7 +14,6 @@
 | BL-02 | Port `cli.js` to GatewayClient HTTP | P2 | ✅ Done | pg removed. All commands use GatewayClient. `audit lineage` deferred — needs gateway endpoint. |
 | BL-02a | `GET /pg/audit/lineage/:topic/:key` gateway endpoint | P3 | ✅ Done | Added to `gateway/src/routes/pg.js`. Used by `scripts/audit-cli.js lineage`. |
 | BL-10 | MCP OAuth 2.1 client auth flow | P2 | ✅ Done | Full PKCE flow in authenticate.js. Gateway BL-12 also ✅ Done — full OAuth round-trip live. |
-| BL-08 | `ingest_pr()` MCP tool | P6 | 🟡 To Do | `dry_run: true` default. GitHub Action deferred to v1.0. |
 | BL-13 | SDLC hooks + SKILL.md enforcement | P2 | ✅ Done | 5 hook scripts + `src/install/hooks.js` + `quorum install --skip-hooks`. SKILL.md updated with "ALWAYS invoke", hook signal table, pull-side recall gate. |
 
 ---
@@ -41,26 +40,6 @@ Use `getGatewayClient()` after loading `.quorum` file defaults at CLI startup.
 - [ ] `import pg from 'pg'` removed from `cli.js`
 - [ ] All commands work via gateway HTTP
 - [ ] `grep -r "from 'pg'" .` returns no output
-
----
-
-### 🟡 BL-08 — `ingest_pr()` MCP tool
-**Files (new):** `src/pr/github.js` · `src/pr/extractor.js` · `src/tools/ingest_pr.js`
-
-```
-ingest_pr({ pr_url: "https://github.com/org/repo/pull/123", dry_run: true })
-```
-
-- `dry_run: true` (default) — returns would-be DRAFTs for review, stores nothing
-- `dry_run: false` — stores via `remember()` with `triggered_by: 'ingest_pr'`
-- If a `principal_architect` approved the PR, elevate extracted confidence +0.10
-- GitHub Action for automatic ingest deferred until extraction quality validated
-
-**Acceptance criteria:**
-- [ ] `dry_run: true` returns extracted items without storing
-- [ ] `dry_run: false` stores via the normal `remember()` pipeline
-- [ ] Principal architect approval elevates confidence
-- [ ] Works with `GITHUB_TOKEN` env for private repos
 
 ---
 
@@ -129,7 +108,7 @@ All hooks guard with `[ -f ".quorum" ] || exit 0` — self-limiting, silent in n
 
 | Item | Reason |
 |------|--------|
-| GitHub Action for PR ingest | After BL-08 manual quality validated |
+| GitHub Action for PR ingest | Dropped — SKILL.md + hooks capture PR knowledge via reflect() |
 | LLM accuracy CI gate | Needs real usage data for golden dataset |
 
 ---
@@ -139,6 +118,7 @@ All hooks guard with `[ -f ".quorum" ] || exit 0` — self-limiting, silent in n
 | Date | Item | Commit |
 |------|------|--------|
 | 2026-05-07 | BL-03 dropped: platform team deploys Quorum centrally; engineers connect from local Claude Code — no local stack CLI needed | (backlog) |
+| 2026-05-08 | BL-08 dropped: SKILL.md + hooks capture PR knowledge via reflect() and remember() — dedicated tool redundant | (backlog) |
 | 2026-05-08 | BL-04 dropped: error messages already actionable; LLM surfaces next steps on failure — silent retry adds complexity without value | (backlog) |
 | 2026-05-08 | BL-07 dropped: MCP `graphitiAvailable` flag dropped — gateway `/health` surfaces Graphiti status; surface failures clearly instead | (backlog) |
 | 2026-05-08 | BL-09 dropped: prompts moved to gateway as inlined template literals (BL-11); `src/prompts/*.md` orphaned; response normalization too simple to unit-test | (backlog) |
