@@ -3,7 +3,7 @@
  * postinstall.js — Runs automatically after `npm install -g @as-quorum/mcp`.
  *
  * Copies skill/ and hooks/ to ~/.claude, merges hook wiring into settings.json,
- * and registers the MCP server under mcpServers in settings.json.
+ * and registers the MCP server at user scope in ~/.claude.json.
  *
  * Exits 0 in all error cases so npm install never fails due to a Claude Code
  * setup issue.
@@ -25,42 +25,47 @@ const pkgRoot = existsSync(join(__dirname, 'skill'))
     : join(__dirname, '..', '..')
 
 /**
- * Merges the Quorum MCP server entry into the mcpServers section of settings.json.
- * Writes a concrete `node <abs-path>` command so the entry is portable without
- * requiring `npx` or PATH resolution at Claude Code startup time.
+ * Merges the Quorum MCP server entry into ~/.claude.json at user (global) scope.
+ * Claude Code stores user-scoped MCP servers under the top-level `mcpServers` key
+ * in ~/.claude.json — distinct from project-scoped entries under `projects.<cwd>.mcpServers`.
  *
- * @param {string} settingsPath - Path to ~/.claude/settings.json
- * @param {string} serverPath   - Absolute path to dist/server.js
+ * Writes a concrete `node <abs-path>` command so the entry works without npx or
+ * PATH resolution at Claude Code startup time.
+ *
+ * @param {string} claudeJsonPath - Path to ~/.claude.json
+ * @param {string} serverPath     - Absolute path to dist/server.js
  */
-export function registerMcpServer(settingsPath, serverPath) {
-  let settings = {}
-  if (existsSync(settingsPath)) {
+export function registerMcpServer(claudeJsonPath, serverPath) {
+  let config = {}
+  if (existsSync(claudeJsonPath)) {
     try {
-      settings = JSON.parse(readFileSync(settingsPath, 'utf8'))
+      config = JSON.parse(readFileSync(claudeJsonPath, 'utf8'))
     } catch {
-      // Already handled (and throws) in installHooks; if we reach here settings.json
-      // must be valid since installHooks ran first.
+      // ~/.claude.json is corrupt — skip rather than clobber user's Claude state
       return
     }
   }
 
-  settings.mcpServers = settings.mcpServers || {}
-  settings.mcpServers.quorum = {
+  config.mcpServers = config.mcpServers || {}
+  config.mcpServers.quorum = {
+    type:    'stdio',
     command: 'node',
     args:    [serverPath],
+    env:     {},
   }
 
-  writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n')
+  writeFileSync(claudeJsonPath, JSON.stringify(config, null, 2) + '\n')
 }
 
 async function main() {
-  const claudeDir    = join(homedir(), '.claude')
-  const hooksDir     = join(claudeDir, 'hooks')
-  const settingsPath = join(claudeDir, 'settings.json')
-  const skillSrc     = join(pkgRoot, 'skill')
-  const skillDest    = join(claudeDir, 'skills', 'quorum')
-  const scriptsSrc   = join(pkgRoot, 'hooks')
-  const serverPath   = join(pkgRoot, 'dist', 'server.js')
+  const claudeDir      = join(homedir(), '.claude')
+  const hooksDir       = join(claudeDir, 'hooks')
+  const settingsPath   = join(claudeDir, 'settings.json')
+  const claudeJsonPath = join(homedir(), '.claude.json')
+  const skillSrc       = join(pkgRoot, 'skill')
+  const skillDest      = join(claudeDir, 'skills', 'quorum')
+  const scriptsSrc     = join(pkgRoot, 'hooks')
+  const serverPath     = join(pkgRoot, 'dist', 'server.js')
 
   let allOk = true
 
@@ -84,10 +89,10 @@ async function main() {
     allOk = false
   }
 
-  // 3. Register MCP server in settings.json
+  // 3. Register MCP server at user scope in ~/.claude.json
   try {
-    registerMcpServer(settingsPath, serverPath)
-    console.log(`[quorum] ✓ MCP server registered (${serverPath})`)
+    registerMcpServer(claudeJsonPath, serverPath)
+    console.log(`[quorum] ✓ MCP server registered at user scope (${serverPath})`)
   } catch (err) {
     console.warn(`[quorum] ✗ MCP registration skipped: ${err.message}`)
     allOk = false
