@@ -3,16 +3,17 @@
  * postinstall.js — Runs automatically after `npm install -g @as-quorum/mcp`.
  *
  * Copies skill/ and hooks/ to ~/.claude, merges hook wiring into settings.json,
- * and registers the MCP server at user scope in ~/.claude.json.
+ * and registers the MCP server at user scope via `claude mcp add --scope user`.
  *
  * Exits 0 in all error cases so npm install never fails due to a Claude Code
  * setup issue.
  */
 
-import { readFileSync, writeFileSync, cpSync, mkdirSync, existsSync } from 'node:fs'
+import { cpSync, mkdirSync, existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { homedir } from 'node:os'
+import { spawnSync } from 'node:child_process'
 import { installHooks } from './hooks.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -25,47 +26,40 @@ const pkgRoot = existsSync(join(__dirname, 'skill'))
     : join(__dirname, '..', '..')
 
 /**
- * Merges the Quorum MCP server entry into ~/.claude.json at user (global) scope.
- * Claude Code stores user-scoped MCP servers under the top-level `mcpServers` key
- * in ~/.claude.json — distinct from project-scoped entries under `projects.<cwd>.mcpServers`.
+ * Registers the Quorum MCP server with Claude Code at user (global) scope
+ * by invoking `claude mcp add --scope user`.
  *
- * Writes a concrete `node <abs-path>` command so the entry works without npx or
- * PATH resolution at Claude Code startup time.
+ * User scope makes the server available in every project without needing
+ * per-project registration. Uses a concrete `node <abs-path>` command so
+ * Claude Code can start the server without PATH or npx resolution.
  *
- * @param {string} claudeJsonPath - Path to ~/.claude.json
- * @param {string} serverPath     - Absolute path to dist/server.js
+ * @param {string} serverPath - Absolute path to dist/server.js
+ * @throws {Error} If the claude CLI is not found or exits non-zero
  */
-export function registerMcpServer(claudeJsonPath, serverPath) {
-  let config = {}
-  if (existsSync(claudeJsonPath)) {
-    try {
-      config = JSON.parse(readFileSync(claudeJsonPath, 'utf8'))
-    } catch {
-      // ~/.claude.json is corrupt — skip rather than clobber user's Claude state
-      return
-    }
-  }
+export function registerMcpServer(serverPath) {
+  const result = spawnSync(
+    'claude',
+    ['mcp', 'add', '--scope', 'user', 'quorum', '--', 'node', serverPath],
+    { stdio: 'pipe' },
+  )
 
-  config.mcpServers = config.mcpServers || {}
-  config.mcpServers.quorum = {
-    type:    'stdio',
-    command: 'node',
-    args:    [serverPath],
-    env:     {},
+  if (result.error) {
+    throw new Error(`claude CLI not found: ${result.error.message}`)
   }
-
-  writeFileSync(claudeJsonPath, JSON.stringify(config, null, 2) + '\n')
+  if (result.status !== 0) {
+    const stderr = result.stderr?.toString().trim() || ''
+    throw new Error(`claude mcp add failed (exit ${result.status}): ${stderr}`)
+  }
 }
 
 async function main() {
-  const claudeDir      = join(homedir(), '.claude')
-  const hooksDir       = join(claudeDir, 'hooks')
-  const settingsPath   = join(claudeDir, 'settings.json')
-  const claudeJsonPath = join(homedir(), '.claude.json')
-  const skillSrc       = join(pkgRoot, 'skill')
-  const skillDest      = join(claudeDir, 'skills', 'quorum')
-  const scriptsSrc     = join(pkgRoot, 'hooks')
-  const serverPath     = join(pkgRoot, 'dist', 'server.js')
+  const claudeDir    = join(homedir(), '.claude')
+  const hooksDir     = join(claudeDir, 'hooks')
+  const settingsPath = join(claudeDir, 'settings.json')
+  const skillSrc     = join(pkgRoot, 'skill')
+  const skillDest    = join(claudeDir, 'skills', 'quorum')
+  const scriptsSrc   = join(pkgRoot, 'hooks')
+  const serverPath   = join(pkgRoot, 'dist', 'server.js')
 
   let allOk = true
 
@@ -89,12 +83,13 @@ async function main() {
     allOk = false
   }
 
-  // 3. Register MCP server at user scope in ~/.claude.json
+  // 3. Register MCP server at user scope via claude CLI
   try {
-    registerMcpServer(claudeJsonPath, serverPath)
+    registerMcpServer(serverPath)
     console.log(`[quorum] ✓ MCP server registered at user scope (${serverPath})`)
   } catch (err) {
     console.warn(`[quorum] ✗ MCP registration skipped: ${err.message}`)
+    console.warn(`[quorum]   Run manually: claude mcp add --scope user quorum -- node ${serverPath}`)
     allOk = false
   }
 

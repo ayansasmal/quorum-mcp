@@ -4,7 +4,9 @@
   "description": "Quorum MCP server — governed engineering memory for Claude Code and AI agents",
   "type": "module",
   "license": "Apache-2.0",
-  "engines": { "node": ">=20.0.0" },
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "bin": {
     "quorum-mcp": "./dist/server.js",
     "quorum": "./dist/cli.js"
@@ -21,18 +23,16 @@
   "files": [
     "dist/",
     "cli.js",
-    "postinstall.js",
     "skill/",
     "hooks/"
   ],
   "scripts": {
     "build": "esbuild src/server.js --bundle --platform=node --format=esm --packages=external --outfile=dist/server.js",
     "build:cli": "esbuild cli.js --bundle --platform=node --format=esm --packages=external --outfile=dist/cli.js",
-    "build:postinstall": "esbuild src/install/postinstall.js --bundle --platform=node --format=esm --packages=external --outfile=dist/postinstall.js",
-    "build:all": "npm run build && npm run build:cli && npm run build:postinstall",
+    "build:all": "npm run build && npm run build:cli",
     "dev": "node --watch src/server.js",
     "start": "node dist/server.js",
-    "postinstall": "node postinstall.js",
+    "setup": "node dist/cli.js install",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:constitutional": "vitest run tests/constitutional",

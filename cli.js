@@ -134,17 +134,18 @@ program
     }
 
     if (!opts.skipMcp) {
+      const serverPath = join(pkgRoot, 'dist', 'server.js')
       const result = spawnSync(
         'claude',
-        ['mcp', 'add', 'quorum', '--', 'npx', '@as-quorum/mcp'],
+        ['mcp', 'add', '--scope', 'user', 'quorum', '--', 'node', serverPath],
         { stdio: 'inherit' },
       )
       if (result.status !== 0) {
         console.error('✗ MCP registration failed. Is the claude CLI installed?')
-        console.error('  Run manually: claude mcp add quorum -- npx @as-quorum/mcp')
+        console.error(`  Run manually: claude mcp add --scope user quorum -- node ${serverPath}`)
         process.exit(1)
       }
-      console.log('✓ MCP server registered with Claude Code')
+      console.log('✓ MCP server registered with Claude Code (user scope)')
     }
 
     console.log('')

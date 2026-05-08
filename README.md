@@ -36,19 +36,14 @@ The MCP server exposes 10 tools to Claude Code. All persistence goes through the
 
 ```bash
 npm install -g @as-quorum/mcp
+quorum install
 ```
 
-That's it. The `postinstall` script automatically:
+`quorum install` sets up everything in one step:
 - Copies the skill to `~/.claude/skills/quorum/`
 - Installs the 5 hook scripts to `~/.claude/hooks/`
 - Wires hook entries into `~/.claude/settings.json`
-- Registers the MCP server under `mcpServers.quorum` in `~/.claude/settings.json`
-
-If anything went wrong (or to re-run manually):
-
-```bash
-quorum install
-```
+- Registers the MCP server at user scope via `claude mcp add --scope user`
 
 Set the gateway URL if it's not on `localhost:3001`:
 
@@ -136,10 +131,9 @@ src/
     client.js         — Outbound HTTP client to gateway
   install/
     hooks.js          — Hook script installer (copies scripts, merges settings.json)
-    postinstall.js    — npm postinstall entry point (global-install guard + MCP registration)
+    postinstall.js    — registerMcpServer() via `claude mcp add --scope user`
   prompts/            — LLM prompt templates (editable Markdown)
 cli.js                — quorum CLI (init, install, audit, history)
-postinstall.js        — thin wrapper: delegates to dist/postinstall.js, no-ops if not yet built
 hooks/                — 5 Claude Code hook scripts (bundled with npm)
 skill/                — SKILL.md + references/ (bundled with npm)
 dist/                 — Compiled output (esbuild, gitignored)
@@ -151,8 +145,9 @@ dist/                 — Compiled output (esbuild, gitignored)
 
 ```bash
 npm install
-npm run dev          # node --watch src/server.js (no build step)
-npm run build:all    # compile server + CLI + postinstall → dist/
+npm run build:all    # compile server + CLI → dist/
+npm run setup        # install skill, hooks, MCP (alias for: quorum install)
+npm run dev          # node --watch src/server.js (no build step needed for MCP server)
 npm test             # constitutional + governance tests
 ```
 
