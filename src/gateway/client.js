@@ -14,6 +14,8 @@
  * QUORUM_GATEWAY_URL is the only env var this module reads.
  */
 
+import { log } from '../logger.js'
+
 const REFRESH_BUFFER_S = 60  // Treat token as expired 60s before actual expiry
 
 // ── Module-level state ─────────────────────────────────────────────────────────
@@ -75,18 +77,18 @@ export class GatewayClient {
   }
 
   /**
-   * Return verified identity claims decoded from the current Gateway-MCP token.
+   * Return identity claims from the current Gateway-MCP token (v0.3 slim JWT).
+   * v0.3 JWT contains only: { sub, is_admin, jti, exp, iat }
+   * Role/team/project are no longer in the JWT — they live in the profile cache.
    * No network call — the JWT is already verified by the gateway on issuance.
-   * @returns {{ sub: string, project: string, role: string|null, team: string|null, expiresIn: number|null }}
+   * @returns {{ sub: string, is_admin: boolean, expiresIn: number|null }}
    */
   async verifyAuth() {
     const { token } = this._getToken()
     const p = decodeJwtPayload(token)
     return {
       sub:       p.sub ?? 'unknown',
-      project:   p.project ?? 'default',
-      role:      p.role ?? null,
-      team:      p.team ?? null,
+      is_admin:  p.is_admin ?? false,
       expiresIn: p.exp ? Math.max(0, p.exp - Math.floor(Date.now() / 1000)) : null,
     }
   }
@@ -98,11 +100,14 @@ export class GatewayClient {
   async getIdentity() {
     const { token } = this._getToken()
     const p = decodeJwtPayload(token)
+    // v0.3: JWT is slim — role/team/base_confidence come from profile cache server-side.
+    // MCP-side identity uses sub + is_admin only; role defaults to null (no privilege escalation).
     return {
       name:            p.sub ?? 'unknown',
-      team:            p.team ?? null,
-      role:            p.role ?? null,
-      base_confidence: p.base_confidence ?? 0.7,
+      is_admin:        p.is_admin ?? false,
+      team:            null,
+      role:            null,
+      base_confidence: 0.7,
       method:          'oauth2_gateway',
     }
   }
@@ -133,41 +138,69 @@ export class GatewayClient {
   // ── HTTP helpers ───────────────────────────────────────────────────────────
 
   /**
+   * Set the active project ID for this client instance.
+   * All subsequent _request calls will include X-Quorum-Project unless
+   * overridden via options.projectId.
+   * @param {string | null} projectId
+   */
+  setProjectId(projectId) {
+    this._projectId = projectId ?? null
+  }
+
+  /**
    * Make an authenticated HTTP request to the gateway.
    * @param {string} method
    * @param {string} path
    * @param {object} [body]
+   * @param {{ projectId?: string | null }} [options]
    * @returns {Promise<unknown>}
    */
-  async _request(method, path, body) {
+  async _request(method, path, body, options = {}) {
     const { token } = this._getToken()
+
+    log.debug('gateway request', { method, path })
+
+    const headers = {
+      'Content-Type':  'application/json',
+      'Authorization': `Bearer ${token}`,
+    }
+    const projectId = options.projectId ?? this._projectId ?? null
+    if (projectId) {
+      headers['X-Quorum-Project'] = projectId
+    }
 
     const response = await fetch(`${this._gatewayUrl}${path}`, {
       method,
-      headers: {
-        'Content-Type':  'application/json',
-        'Authorization': `Bearer ${token}`,
-      },
+      headers,
       ...(body != null ? { body: JSON.stringify(body) } : {}),
     })
 
     if (!response.ok) {
-      const err = await response.json().catch(() => ({}))
-      throw new Error(`Gateway ${method} ${path} failed (${response.status}): ${err.message ?? response.statusText}`)
+      const errBody = await response.json().catch(() => ({}))
+      log.error('gateway request failed', { method, path, status: response.status, body: errBody })
+      throw new Error(`Gateway ${method} ${path} failed (${response.status}): ${errBody.message ?? response.statusText}`)
     }
 
     if (response.status === 204) return null
     return response.json()
   }
 
-  /** @param {string} path @param {Record<string, string>} [query] */
-  async _get(path, query) {
+  /**
+   * @param {string} path
+   * @param {Record<string, string>} [query]
+   * @param {{ projectId?: string | null }} [options]
+   */
+  async _get(path, query, options = {}) {
     const url = query ? `${path}?${new URLSearchParams(query)}` : path
-    return this._request('GET', url)
+    return this._request('GET', url, null, options)
   }
 
-  /** @param {string} path @param {object} body */
-  async _post(path, body) { return this._request('POST', path, body) }
+  /**
+   * @param {string} path
+   * @param {object} body
+   * @param {{ projectId?: string | null }} [options]
+   */
+  async _post(path, body, options = {}) { return this._request('POST', path, body, options) }
 
   /** @param {string} path @param {object} body */
   async _patch(path, body) { return this._request('PATCH', path, body) }
@@ -256,6 +289,34 @@ export class GatewayClient {
     return data.count
   }
 
+  async getPendingDecisionById(conflictId) {
+    return this._get(`/pg/pending/${enc(conflictId)}`)
+  }
+
+  // ── Draft / status version queries ────────────────────────────────────────
+
+  async getLatestDraftVersion(topic, key) {
+    return this._get(`/pg/versions/latest-draft/${enc(topic)}/${enc(key)}`)
+  }
+
+  async getVersionsByStatus(status, { topic } = {}) {
+    const query = {}
+    if (topic) query.topic = topic
+    return this._get(`/pg/versions/by-status/${enc(status)}`, Object.keys(query).length ? query : undefined)
+  }
+
+  async getVersionStatusCounts({ topic } = {}) {
+    const query = {}
+    if (topic) query.topic = topic
+    return this._get('/pg/versions/status-counts', Object.keys(query).length ? query : undefined)
+  }
+
+  async getDraftVersions({ topic } = {}) {
+    const query = {}
+    if (topic) query.topic = topic
+    return this._get('/pg/versions/drafts', Object.keys(query).length ? query : undefined)
+  }
+
   // ── Config ─────────────────────────────────────────────────────────────────
 
   async getConfig(projectId) {
@@ -278,17 +339,20 @@ export class GatewayClient {
 
 /**
  * Return the gateway client singleton, creating it if needed.
- * Returns null when QUORUM_GATEWAY_URL is not set (no gateway configured).
+ * Accepts an optional gatewayUrl parameter — if the URL differs from the
+ * current client's URL, the singleton is recreated for the new URL.
+ * Returns null when neither gatewayUrl nor QUORUM_GATEWAY_URL is set.
  * Authentication state is separate — check isAuthenticated() before tool calls.
+ * @param {string} [gatewayUrl] - Optional gateway URL override (from ctx)
  * @returns {GatewayClient | null}
  */
-export function getGatewayClient() {
-  if (_client) return _client
-
-  const url = process.env.QUORUM_GATEWAY_URL
+export function getGatewayClient(gatewayUrl) {
+  const url = gatewayUrl ?? process.env.QUORUM_GATEWAY_URL
   if (!url) return null
 
-  _client = new GatewayClient(url)
+  // Recreate client if URL has changed (project switch between calls)
+  if (_client && _client._gatewayUrl !== url) _client = null
+  if (!_client) _client = new GatewayClient(url)
   return _client
 }
 

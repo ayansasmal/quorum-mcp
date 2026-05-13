@@ -11,7 +11,8 @@
  *   7. Gateway redirects to localhost callback with ?code=...
  *   8. MCP exchanges code + verifier via POST /oauth/token
  *   9. Stores the Gateway-MCP Token (ES256 JWT) in-memory via setGatewayToken()
- *  10. Closes the callback listener
+ *  10. Gateway-MCP Token stored in-memory; project context derives from .quorum file at each call
+ *  11. Closes the callback listener
  *
  * The Gateway-MCP Token carries: sub, project, role, team, base_confidence, permissions.
  * It is the only token the MCP server ever holds — GitHub token never leaves the gateway.
@@ -184,10 +185,12 @@ async function exchangeCode(tokenEndpoint, clientId, code, redirectUri, verifier
 /**
  * @param {import('../gateway/client.js').GatewayClient} _gw
  * @param {z.infer<typeof schema>} input
+ * @param {import('../identity/resolver.js').ResolvedIdentity} [identity]
+ * @param {{ projectId: string, gatewayUrl: string } | null} [ctx]
  * @returns {Promise<Record<string, unknown>>}
  */
-export async function handler(_gw, input) {
-  const gatewayUrl = process.env.QUORUM_GATEWAY_URL
+export async function handler(_gw, input, identity, ctx) {
+  const gatewayUrl = ctx?.gatewayUrl ?? process.env.QUORUM_GATEWAY_URL
 
   if (!gatewayUrl) {
     return {
@@ -196,7 +199,7 @@ export async function handler(_gw, input) {
     }
   }
 
-  const projectId = input.project_id ?? process.env.QUORUM_PROJECT_ID ?? null
+  const projectId = input.project_id ?? ctx?.projectId ?? null
 
   // Allow re-auth even if already authenticated (e.g. engineer switching project)
   if (isAuthenticated() && !input.project_id) {
@@ -205,11 +208,9 @@ export async function handler(_gw, input) {
     return {
       status:     'already_authenticated',
       user:       auth.sub,
-      project:    auth.project,
-      role:       auth.role ?? 'none',
-      team:       auth.team ?? 'none',
+      is_admin:   auth.is_admin,
       expires_in: auth.expiresIn,
-      note:       'Already authenticated. Pass project_id to switch project.',
+      note:       'Already authenticated. Project context is derived from the .quorum file in your workspace — no switching needed.',
     }
   }
 
@@ -322,10 +323,8 @@ export async function handler(_gw, input) {
   return {
     status:     'authenticated',
     user:       auth.sub,
-    project:    auth.project,
-    role:       auth.role ?? 'none',
-    team:       auth.team ?? 'none',
+    is_admin:   auth.is_admin,
     expires_in: auth.expiresIn,
-    note:       'Gateway-MCP Token stored in-memory only. Re-auth required if the MCP server restarts.',
+    note:       'Gateway-MCP Token stored in-memory only. Re-auth required if the MCP server restarts. Project context is derived from the .quorum file in your workspace.',
   }
 }

@@ -25,9 +25,14 @@ export const schema = z.object({
 /**
  * @param {import('pg').Pool} pg
  * @param {z.infer<typeof schema>} input
+ * @param {import('../identity/resolver.js').ResolvedIdentity} [identity]
+ * @param {{ projectId: string, gatewayUrl: string } | null} [ctx]
  * @returns {Promise<Record<string, unknown>>}
  */
-export async function handler(pg, input) {
+export async function handler(pg, input, identity, ctx) {
+  const projectId = ctx?.projectId
+  if (!projectId) throw new Error('forget: ctx.projectId is required — ensure a .quorum file exists in this workspace')
+
   // Constitutional rules checked before pipeline wrapping
   enforceNoHardDelete('forget')
   enforceReasonRequired(input.reason, 'forget')
@@ -43,7 +48,7 @@ export async function handler(pg, input) {
       governanceData: { reason: input.reason },
     },
     async () => {
-      const existing = await getCurrentVersion(pg, input.topic, input.key)
+      const existing = await getCurrentVersion(pg, input.topic, input.key, projectId)
       if (!existing) {
         return {
           result: { status: 'not_found', topic: input.topic, key: input.key },
@@ -51,7 +56,7 @@ export async function handler(pg, input) {
         }
       }
 
-      const nextVersion = await getNextVersionNumber(pg, input.topic, input.key)
+      const nextVersion = await getNextVersionNumber(pg, input.topic, input.key, projectId)
 
       // Soft-deprecate in Graphiti (writes deprecation episode — never deletes)
       if (existing.graphiti_episode_id) {
@@ -59,7 +64,7 @@ export async function handler(pg, input) {
           key: `${input.topic}:${input.key}`,
           reason: input.reason,
           author: input.author,
-        }).catch(() => {})
+        }, projectId).catch(() => {})
       }
 
       // Create new DEPRECATED version record
@@ -75,6 +80,7 @@ export async function handler(pg, input) {
         supersedesVersion: existing.version,
         supersedesReason: input.reason,
         status: KnowledgeStatus.DEPRECATED,
+        projectId,
       })
 
       await insertVersion(pg, versionRecord)
@@ -82,6 +88,7 @@ export async function handler(pg, input) {
         pg, input.topic, input.key, existing.version,
         KnowledgeStatus.DEPRECATED,
         { supersededByVersion: nextVersion, supersededByAuthor: input.author },
+        projectId,
       )
 
       return {

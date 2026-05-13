@@ -57,6 +57,8 @@ const pg = {}
 /** Minimal identity object */
 const identity = { name: 'reviewer', role: 'engineer' }
 
+const testCtx = { projectId: 'test-project', gatewayUrl: 'http://localhost:3001' }
+
 /**
  * Build a pending conflict row as returned by getPendingDecisions().
  * @param {object} [overrides]
@@ -92,7 +94,7 @@ describe('pending() — staleness detection', () => {
     getCurrentVersion.mockResolvedValue({ version: 3 })
     markPendingDecisionStale.mockResolvedValue(undefined)
 
-    const result = await handler(pg, {}, identity)
+    const result = await handler(pg, {}, identity, testCtx)
 
     expect(result.conflict_briefs).toHaveLength(1)
     const brief = result.conflict_briefs[0]
@@ -120,7 +122,7 @@ describe('pending() — staleness detection', () => {
     getPendingDecisions.mockResolvedValue([makePendingRow({ active_version_at_creation: 3 })])
     getCurrentVersion.mockResolvedValue({ version: 3 })
 
-    const result = await handler(pg, {}, identity)
+    const result = await handler(pg, {}, identity, testCtx)
 
     expect(result.conflict_briefs).toHaveLength(1)
     expect(result.conflict_briefs[0].stale_warning).toBeNull()
@@ -132,7 +134,7 @@ describe('pending() — staleness detection', () => {
   it('returns a clean empty response when the queue has no pending decisions', async () => {
     getPendingDecisions.mockResolvedValue([])
 
-    const result = await handler(pg, {}, identity)
+    const result = await handler(pg, {}, identity, testCtx)
 
     expect(result.conflict_briefs).toHaveLength(0)
     expect(result.draft_reviews).toHaveLength(0)

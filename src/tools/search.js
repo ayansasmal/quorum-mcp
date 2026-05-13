@@ -29,10 +29,13 @@ export const schema = z.object({
 /**
  * @param {import('pg').Pool} pg
  * @param {z.infer<typeof schema>} input
+ * @param {import('../identity/resolver.js').ResolvedIdentity} [identity]
+ * @param {{ projectId: string, gatewayUrl: string } | null} [ctx]
  * @returns {Promise<Record<string, unknown>>}
  */
-export async function handler(pg, input) {
-  const projectId = process.env.QUORUM_GROUP_ID ?? 'default'
+export async function handler(pg, input, identity, ctx) {
+  const projectId = ctx?.projectId
+  if (!projectId) throw new Error('search: ctx.projectId is required — ensure a .quorum file exists in this workspace')
   const includeGlobal = projectId !== 'global'
 
   const pipelineResult = await withAuditPipeline(

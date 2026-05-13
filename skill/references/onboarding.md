@@ -11,8 +11,11 @@ your available tools (Bash, Read, Write). Only ask the human when explicitly not
 ls -la .quorum *.quorum.json ~/.claude/skills/quorum/SKILL.md 2>/dev/null
 ```
 
-If `.quorum` already exists → confirm with human before continuing. The `project_id`
-in that file is the active namespace; re-onboarding overwrites the config in S3.
+If `.quorum` already exists → **stop immediately**. This project is already onboarded.
+A project can only be onboarded once — the config in S3 is the authoritative record.
+To connect a new machine to an existing Quorum project, skip to Phase 5 (create the
+`.quorum` file) and Phase 6 (register the MCP). To update the project config, use the
+dashboard Config editor or `POST /sync/configs`.
 
 ---
 
@@ -26,9 +29,12 @@ Ask the human in **one prompt**:
 >    (`principal_architect` | `senior_engineer` | `engineer` | `junior`)
 > 3. **Key domains** — any domain needing stricter governance e.g. `auth`, `payments`
 >    (optional — standard thresholds apply otherwise)
-> 4. **Gateway URL** — where Quorum gateway is running (default: `http://localhost:3001`)"
-
+> 4. **Gateway URL** — where Quorum gateway is running (default: `http://localhost:3001`)
+>
 Do not proceed until you have at least a project ID and one team member.
+
+> **Auth note:** Call `authenticate()` via the MCP tool before Phase 4. The PKCE browser
+> flow issues a JWT scoped to your role. Phase 4 uses that JWT — no separate sync secret needed.
 
 ---
 
@@ -84,42 +90,51 @@ If `"valid": false` → fix errors in the response, re-validate. Do not continue
 
 ---
 
-## Phase 4 — Upload config to S3
+## Phase 4 — Upload config to gateway
 
-Config files are stored as flat keys: `<group_id>.quorum.json` (no subdirectory).
+Call `authenticate()` first if not already done — this stores the JWT in MCP server
+memory. No token copying or manual Authorization headers are needed.
 
-```bash
-PROJECT_ID=$(node -e "const f=require('node:fs');const c=JSON.parse(f.readFileSync('${PROJECT_ID}.quorum.json','utf8'));console.log(c.group_id)")
+Then call the `config_upload` MCP tool directly:
 
-# Local dev (LocalStack)
-awslocal s3 cp "${PROJECT_ID}.quorum.json" \
-  "s3://quorum-configs/${PROJECT_ID}.quorum.json"
-
-# Verify
-awslocal s3 ls s3://quorum-configs/
+```javascript
+config_upload({ config_path: "<project_id>.quorum.json" })
 ```
 
-For production (real S3) replace `awslocal` with `aws`:
-```bash
-aws s3 cp "${PROJECT_ID}.quorum.json" "s3://quorum-configs/${PROJECT_ID}.quorum.json"
+The tool reads the file, POSTs to `POST /config/upload`, and injects the in-memory
+JWT automatically. The gateway validates, stores in S3, and syncs to DynamoDB in
+one call.
+
+Expected response:
+```json
+{ "status": "onboarded", "project_id": "<project_id>", "message": "Project '...' onboarded successfully." }
 ```
 
-Then trigger a gateway sync so the config is cached in DynamoDB immediately:
-```bash
-curl -s -X POST "${GATEWAY_URL}/sync/configs" \
-  -H "Authorization: Bearer <your-jwt>" | python3 -m json.tool
-# Expected: { "synced": 1, "failed": [], "duration_ms": ... }
-```
+A `{ "status": "already_onboarded" }` response means the project already exists in
+S3 — proceed to Phase 5. You are connecting to an existing project, not creating a
+new one.
 
 ---
 
 ## Phase 5 — Create the `.quorum` discovery file
 
+First, resolve the CLI path:
+
 ```bash
-node /path/to/quorum/cli.js init \
+# Option A — globally installed
+which quorum && QUORUM_CLI="quorum"
+
+# Option B — running from source (check MCP registration)
+# claude mcp list shows the path to server.js — derive cli.js from it
+QUORUM_CLI="node $(claude mcp list | grep quorum | grep -o '[^ ]*server\.js' | sed 's/dist\/server\.js/cli.js/' | sed 's/src\/server\.js/cli.js/')"
+```
+
+Then create the `.quorum` file:
+
+```bash
+$QUORUM_CLI init \
   --gateway-url "${QUORUM_GATEWAY_URL:-http://localhost:3001}" \
-  --project-id "$PROJECT_ID" \
-  --yes
+  --project-id "$PROJECT_ID"
 ```
 
 This writes `.quorum` to the current directory. The MCP server auto-discovers it
@@ -127,50 +142,48 @@ by walking up the directory tree — no manual env vars needed.
 
 ---
 
-## Phase 6 — Identity and MCP registration
+## Phase 6 — Share onboarding instructions with the team
 
-Tell the human what to set in their shell profile:
+You are already connected (MCP running + skill installed — that's how this onboarding
+is executing). Phase 6 is for **every other engineer** joining this project.
 
+Send each engineer:
+
+> **To connect your machine to the `<project_id>` Quorum project:**
+>
+> 1. Install the MCP server (if not already installed):
+>    ```bash
+>    npm install -g @as-quorum/mcp
+>    ```
+>    This runs `quorum install` automatically via postinstall — skill, hooks, and MCP
+>    registration are all handled. No manual steps needed.
+>
+> 2. Create the project discovery file in the repo root:
+>    ```bash
+>    quorum init \
+>      --gateway-url "<QUORUM_GATEWAY_URL>" \
+>      --project-id "<project_id>"
+>    ```
+>    (The `.quorum` file will already be committed after Phase 9 — just pull and you're done.)
+>
+> 3. Open a new Claude Code session in the repo. Quorum will authenticate automatically
+>    via GitHub OAuth on first use — no tokens or PATs required.
+
+For CI contexts where no interactive browser is available, engineers set:
 ```bash
-# Most authoritative — verifies via GitHub API
-export QUORUM_GITHUB_TOKEN=ghp_...
-
-# CI contexts only (no PAT available)
-# export QUORUM_AUTHOR=your-username
-```
-
-Then register the MCP server:
-```bash
-claude mcp add quorum -- node /path/to/quorum/src/server.js
-```
-
-Verify auth:
-```bash
-curl -s -X POST "${QUORUM_GATEWAY_URL:-http://localhost:3001}/auth/token" \
-  -H "Content-Type: application/json" \
-  -d "{\"github_token\":\"$QUORUM_GITHUB_TOKEN\",\"project_id\":\"$PROJECT_ID\"}"
-# Expected: { "token": "eyJ...", "sub": "<github_username>", "project": "...", "role": "..." }
+# CI only — not for interactive engineer sessions
+export QUORUM_AUTHOR=your-github-username
 ```
 
 ---
 
-## Phase 7 — Install the Quorum skill
-
-Install at **user level** — active in every project on the machine, no per-repo commits needed:
+## Phase 7 — Verify your own connection
 
 ```bash
-# From the Quorum repo root (preferred — handles references/ too):
-npm run skill:install
-
-# Or manually:
-rm -rf ~/.claude/skills/quorum
-mkdir -p ~/.claude/skills/quorum
-cp -r /path/to/quorum/skill/. ~/.claude/skills/quorum/
+ls ~/.claude/skills/quorum/SKILL.md ~/.claude/hooks/quorum-*.sh
 ```
 
-The skill directory must be `~/.claude/skills/quorum/` (a subdirectory containing
-`SKILL.md` and `references/`). A flat file at `~/.claude/skills/quorum.md` will
-**not** be found by the `Skill` tool — delete it if it exists.
+Expected: SKILL.md and 5 hook scripts present. If missing, re-run `quorum install`.
 
 ---
 
@@ -221,6 +234,12 @@ ls -lt ~/.claude/projects/$(echo $PWD | tr '/' '-')/*.jsonl 2>/dev/null | head -
 Read the most recent 1–3 sessions. Look for decisions made with stated rationale.
 Call `search()` first for each candidate — do not re-ingest what is already in Quorum.
 
+**Before extracting from transcripts:**
+- Scan for secrets, tokens, passwords, PII (email addresses, names in sensitive context)
+- Never store raw transcript content — extract only the architectural decision or constraint
+- If a section contains credentials or personal data, skip it entirely
+- Paraphrase; do not quote conversation verbatim into Quorum knowledge entries
+
 ---
 
 ## Phase 9 — Commit onboarding files
@@ -228,11 +247,22 @@ Call `search()` first for each candidate — do not re-ingest what is already in
 The config file lives outside the repo (gitignored — it contains real usernames/emails
 and is uploaded to S3). Only commit the `.quorum` discovery file:
 
+First, ensure runtime artifacts are gitignored:
+
 ```bash
-git add .quorum
+echo '*.quorum.json' >> .gitignore
+echo '.quorum-reflected' >> .gitignore
+echo '.quorum-offline.log' >> .gitignore
+```
+
+Then commit:
+
+```bash
+git add .quorum .gitignore
 git commit -m "chore: onboard project to Quorum governed memory
 
 - .quorum: gateway auto-discovery file (walks up directory tree)
+- .gitignore: exclude quorum config, session state, and offline log
 
 Config (<group_id>.quorum.json) is gitignored — it is uploaded to S3,
 not committed. Skill is installed user-level at ~/.claude/skills/quorum/."
@@ -265,10 +295,10 @@ curl http://localhost:3001/health
 flowchart TD
     P1[Phase 1: Check existing setup] --> P2[Phase 2: Gather team info]
     P2 --> P3[Phase 3: Create + validate config]
-    P3 --> P4[Phase 4: Upload to S3]
+    P3 --> P4[Phase 4: Upload config to gateway]
     P4 --> P5[Phase 5: Create .quorum file]
-    P5 --> P6[Phase 6: Identity + MCP registration]
-    P6 --> P7[Phase 7: Install SKILL.md]
+    P5 --> P6[Phase 6: Share team instructions]
+    P6 --> P7[Phase 7: Verify own connection]
     P7 --> P8[Phase 8: Ingest CLAUDE.md / MEMORY.md / sessions]
     P8 --> P9[Phase 9: Commit onboarding files]
     P9 --> P10[Phase 10: Verify connection]

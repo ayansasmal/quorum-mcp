@@ -31,9 +31,14 @@ export const schema = z.object({
 /**
  * @param {import('pg').Pool} pg
  * @param {z.infer<typeof schema>} input
+ * @param {import('../identity/resolver.js').ResolvedIdentity} [identity]
+ * @param {{ projectId: string, gatewayUrl: string } | null} [ctx]
  * @returns {Promise<string | null>}
  */
-export async function handler(pg, input) {
+export async function handler(pg, input, identity, ctx) {
+  const projectId = ctx?.projectId
+  if (!projectId) throw new Error('recall: ctx.projectId is required — ensure a .quorum file exists in this workspace')
+
   const pipelineResult = await withAuditPipeline(
     pg,
     {
@@ -46,7 +51,7 @@ export async function handler(pg, input) {
     async () => {
       // ── History mode ──────────────────────────────────────────────────────
       if (input.history) {
-        const versions = await getVersionHistory(pg, input.topic, input.key)
+        const versions = await getVersionHistory(pg, input.topic, input.key, projectId)
         if (versions.length === 0) return { result: null, versionImpact: buildAuditVersionImpact([], []) }
         return {
           result: formatHistory(input.topic, input.key, versions),
@@ -56,7 +61,7 @@ export async function handler(pg, input) {
 
       // ── Point-in-time mode ────────────────────────────────────────────────
       if (input.at) {
-        const version = await getVersionAtDate(pg, input.topic, input.key, input.at)
+        const version = await getVersionAtDate(pg, input.topic, input.key, input.at, projectId)
         if (!version) return { result: null, versionImpact: buildAuditVersionImpact([], []) }
         return {
           result: formatVersion(version, { pointInTime: input.at }),
@@ -66,7 +71,7 @@ export async function handler(pg, input) {
 
       // ── Specific version mode ─────────────────────────────────────────────
       if (input.version != null) {
-        const version = await getSpecificVersion(pg, input.topic, input.key, input.version)
+        const version = await getSpecificVersion(pg, input.topic, input.key, input.version, projectId)
         if (!version) return { result: null, versionImpact: buildAuditVersionImpact([], []) }
         return {
           result: formatVersion(version, { explicit: true }),
@@ -75,7 +80,6 @@ export async function handler(pg, input) {
       }
 
       // ── Default: ACTIVE version with global fallback (GAP-27) ─────────────
-      const projectId = process.env.QUORUM_GROUP_ID ?? 'default'
       let version = await getCurrentVersion(pg, input.topic, input.key, projectId)
       let fromGlobal = false
 

@@ -70,16 +70,18 @@ export const schema = z.object({
  * @param {import('pg').Pool} pg
  * @param {z.infer<typeof schema>} input
  * @param {import('../identity/resolver.js').ResolvedIdentity} identity
+ * @param {{ projectId: string, gatewayUrl: string } | null} [ctx]
  * @returns {Promise<Record<string, unknown>>}
  */
-export async function handler(pg, input, identity) {
+export async function handler(pg, input, identity, ctx) {
   const author = identity?.name ?? 'anonymous'
   const domain = input.domain ?? input.topic
   const rawConfidence = initialConfidence(input.confidence)
   const confidence = identity ? resolveAuthorConfidence(rawConfidence, identity) : rawConfidence
   const triggeredBy = input.triggered_by ?? TriggeredBy.ENGINEER_DECISION
   const tags = normalizeTags(input.tags)
-  const projectId = process.env.QUORUM_GROUP_ID ?? 'default'
+  const projectId = ctx?.projectId
+  if (!projectId) throw new Error('remember: ctx.projectId is required — ensure a .quorum file exists in this workspace')
 
   // ── GAP-27: Global namespace write guard ────────────────────────────────────
   // The 'global' project is readable by all projects but writable only by
@@ -96,7 +98,7 @@ export async function handler(pg, input, identity) {
 
   // ── Resolve a pending conflict ──────────────────────────────────────────────
   if (input.conflict_id && input.resolution) {
-    return resolveConflictDecision(pg, input, identity, author, confidence, tags, triggeredBy)
+    return resolveConflictDecision(pg, input, identity, author, confidence, tags, triggeredBy, projectId)
   }
 
   const pipelineResult = await withAuditPipeline(
@@ -110,7 +112,7 @@ export async function handler(pg, input, identity) {
       contentHash: hashContent(input.content),
     },
     async () => {
-      const existing = await getCurrentVersion(pg, input.topic, input.key)
+      const existing = await getCurrentVersion(pg, input.topic, input.key, projectId)
 
       // ── Superseding existing knowledge ──────────────────────────────────────
       if (existing) {
@@ -145,7 +147,7 @@ export async function handler(pg, input, identity) {
             )
 
             // Count other pending decisions for same topic:key (ordering context)
-            const morePendingSameKey = await countPendingForKey(pg, input.topic, input.key)
+            const morePendingSameKey = await countPendingForKey(pg, input.topic, input.key, projectId)
 
             await insertPendingDecision(pg, {
               conflict_id: conflictId,
@@ -157,6 +159,7 @@ export async function handler(pg, input, identity) {
               conflict_reason: conflictResult.reason,
               enrichment,
               more_pending_same_key: morePendingSameKey,
+              project_id: projectId,
             })
 
             // GAP-17: Fire webhook notification asynchronously — must never block write
@@ -204,9 +207,10 @@ export async function handler(pg, input, identity) {
  * @param {string} [authorRole]
  * @param {string} [projectId='default']
  */
-async function supersede(pg, input, existing, author, confidence, tags, triggeredBy, authorRole, projectId = 'default') {
+async function supersede(pg, input, existing, author, confidence, tags, triggeredBy, authorRole, projectId) {
+  if (!projectId) throw new Error('supersede: projectId is required')
   const isGlobal = projectId === GLOBAL_PROJECT_ID
-  const nextVersion = await getNextVersionNumber(pg, input.topic, input.key)
+  const nextVersion = await getNextVersionNumber(pg, input.topic, input.key, projectId)
 
   const graphitiResult = await addSupersedingEpisode(input.content, existing.graphiti_episode_id, {
     key: `${input.topic}:${input.key}`,
@@ -215,7 +219,7 @@ async function supersede(pg, input, existing, author, confidence, tags, triggere
     tags,
     confidence,
     reason: input.reason,
-  })
+  }, projectId)
 
   // Global writes always enter DRAFT — supersession only finalises after review approval
   const newStatus = isGlobal ? KnowledgeStatus.DRAFT : KnowledgeStatus.ACTIVE
@@ -235,6 +239,7 @@ async function supersede(pg, input, existing, author, confidence, tags, triggere
     supersedesVersion: existing.version,
     supersedesReason: input.reason,
     status: newStatus,
+    projectId,
   })
 
   await insertVersion(pg, { ...versionRecord, tags })
@@ -243,7 +248,7 @@ async function supersede(pg, input, existing, author, confidence, tags, triggere
   // For global: old ACTIVE stays until a reviewer approves the DRAFT.
   if (!isGlobal) {
     const forwardLink = buildForwardLink({ supersededByVersion: nextVersion, supersededByAuthor: author })
-    await transitionVersionStatus(pg, input.topic, input.key, existing.version, KnowledgeStatus.SUPERSEDED, forwardLink)
+    await transitionVersionStatus(pg, input.topic, input.key, existing.version, KnowledgeStatus.SUPERSEDED, forwardLink, projectId)
 
     // GAP-21: mark the superseded author's entry as superseded in their domain track record
     incrementDomainStat(pg, {
@@ -289,7 +294,8 @@ async function supersede(pg, input, existing, author, confidence, tags, triggere
  * @param {string} [authorRole]
  * @param {string} [projectId='default']
  */
-async function storeFirst(pg, input, author, confidence, tags, triggeredBy, authorRole, projectId = 'default') {
+async function storeFirst(pg, input, author, confidence, tags, triggeredBy, authorRole, projectId) {
+  if (!projectId) throw new Error('storeFirst: projectId is required')
   const isGlobal = projectId === GLOBAL_PROJECT_ID
 
   const graphitiResult = await addEpisode(input.content, {
@@ -298,7 +304,7 @@ async function storeFirst(pg, input, author, confidence, tags, triggeredBy, auth
     entityType: input.entity_type,
     tags,
     confidence,
-  })
+  }, projectId)
 
   const status =
     isGlobal ||
@@ -321,6 +327,7 @@ async function storeFirst(pg, input, author, confidence, tags, triggeredBy, auth
     auditEntryId: 'pre_pending',
     graphitiEpisodeId: graphitiResult.episode_id,
     status,
+    projectId,
   })
 
   await insertVersion(pg, { ...versionRecord, tags })
@@ -357,7 +364,8 @@ async function storeFirst(pg, input, author, confidence, tags, triggeredBy, auth
  * @param {string} [authorRole]
  * @param {string} [projectId='default']
  */
-async function storePendingConflictCheck(pg, input, author, confidence, tags, triggeredBy, authorRole, projectId = 'default') {
+async function storePendingConflictCheck(pg, input, author, confidence, tags, triggeredBy, authorRole, projectId) {
+  if (!projectId) throw new Error('storePendingConflictCheck: projectId is required')
   const existing = await getCurrentVersion(pg, input.topic, input.key, projectId)
   const version = existing ? (existing.version + 1) : 1
 
@@ -420,7 +428,8 @@ async function storePendingConflictCheck(pg, input, author, confidence, tags, tr
  * @param {string[]} tags
  * @param {string} triggeredBy
  */
-async function resolveConflictDecision(pg, input, identity, author, confidence, tags, triggeredBy) {
+async function resolveConflictDecision(pg, input, identity, author, confidence, tags, triggeredBy, projectId) {
+  if (!projectId) throw new Error('resolveConflictDecision: projectId is required')
   enforceReasonRequired(input.reason, `conflict resolution (${input.resolution})`)
 
   const decision = await getPendingDecisionById(pg, input.conflict_id)
@@ -430,7 +439,7 @@ async function resolveConflictDecision(pg, input, identity, author, confidence, 
 
   const topic = decision.conflict_topic
   const key = decision.conflict_key
-  const existing = await getCurrentVersion(pg, topic, key)
+  const existing = await getCurrentVersion(pg, topic, key, projectId)
 
   if (input.resolution === 'reject' || input.resolution === 'escalate') {
     await resolvePendingDecision(pg, input.conflict_id, {
@@ -451,7 +460,7 @@ async function resolveConflictDecision(pg, input, identity, author, confidence, 
 
   if (input.resolution === 'supersede') {
     if (!existing) return { status: 'error', message: `No ACTIVE version found for ${topic}:${key}` }
-    const result = await supersede(pg, { ...input, topic, key, reason: input.reason }, existing, author, confidence, tags, TriggeredBy.CONFLICT_RESOLUTION)
+    const result = await supersede(pg, { ...input, topic, key, reason: input.reason }, existing, author, confidence, tags, TriggeredBy.CONFLICT_RESOLUTION, identity?.role, projectId)
     await closeConflict(pg, input.conflict_id, 'supersede', input.reason, author, null, null)
     return { ...result.result, conflict_id: input.conflict_id }
   }
@@ -467,12 +476,13 @@ async function resolveConflictDecision(pg, input, identity, author, confidence, 
       key: `${topic}:${input.split_existing_key}`,
       source: `quorum:split:${author}`,
       tags: normalizeTags([...tags, key]),
-    })
+    }, projectId)
     const recordA = buildVersionRecord({
       topic, key: input.split_existing_key, version: 1,
       content: contentA, author, confidence, tags: normalizeTags([...tags, key]),
       triggeredBy: TriggeredBy.CONFLICT_RESOLUTION, auditEntryId: 'pre_pending',
       graphitiEpisodeId: episodeA.episode_id,
+      projectId,
     })
     await insertVersion(pg, { ...recordA, tags: normalizeTags([...tags, key]) })
 
@@ -482,12 +492,13 @@ async function resolveConflictDecision(pg, input, identity, author, confidence, 
       key: `${topic}:${input.split_incoming_key}`,
       source: `quorum:split:${author}`,
       tags: normalizeTags([...tags, key]),
-    })
+    }, projectId)
     const recordB = buildVersionRecord({
       topic, key: input.split_incoming_key, version: 1,
       content: contentB, author, confidence, tags: normalizeTags([...tags, key]),
       triggeredBy: TriggeredBy.CONFLICT_RESOLUTION, auditEntryId: 'pre_pending',
       graphitiEpisodeId: episodeB.episode_id,
+      projectId,
     })
     await insertVersion(pg, { ...recordB, tags: normalizeTags([...tags, key]) })
 
@@ -495,7 +506,7 @@ async function resolveConflictDecision(pg, input, identity, author, confidence, 
     if (existing) {
       const splitReason = `Split into ${topic}:${input.split_existing_key} and ${topic}:${input.split_incoming_key} — ${input.reason}`
       const forwardLink = buildForwardLink({ supersededByVersion: existing.version + 1, supersededByAuthor: author })
-      await transitionVersionStatus(pg, topic, key, existing.version, KnowledgeStatus.SUPERSEDED, forwardLink)
+      await transitionVersionStatus(pg, topic, key, existing.version, KnowledgeStatus.SUPERSEDED, forwardLink, projectId)
       void splitReason // used in audit note below
     }
 
@@ -521,7 +532,7 @@ async function resolveConflictDecision(pg, input, identity, author, confidence, 
     const mergeResult = await supersede(
       pg,
       { ...input, topic, key, content: input.merged_content, reason: input.reason },
-      existing, author, confidence, tags, TriggeredBy.CONFLICT_RESOLUTION,
+      existing, author, confidence, tags, TriggeredBy.CONFLICT_RESOLUTION, identity?.role, projectId,
     )
 
     await closeConflict(pg, input.conflict_id, 'coexist_merge', input.reason, author, null, null,

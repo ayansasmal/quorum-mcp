@@ -17,62 +17,116 @@
  * Tool schemas do not accept author/reviewer as input — server-side only.
  */
 
-// Apply .quorum project file defaults before any other initialization.
-// This sets QUORUM_GATEWAY_URL and QUORUM_PROJECT_ID if not already set via env.
-import { applyQuorumFileDefaults } from './quorum-file.js'
-applyQuorumFileDefaults()
+import { findAndLoadQuorumFile } from './quorum-file.js';
+import { log } from './logger.js';
 
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
-import { createServer } from 'node:http'
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { createServer } from 'node:http';
 
-import { verifyChain, ChainIntegrityViolation } from './audit/chain.js'
-import { getAllEntries, countEntries } from './audit/secondary.js'
-import { validateManifestHasNoDeleteTools } from './governance/constitutional.js'
-import { ping as pingGraphiti } from './graph/client.js'
-import { loadConfig, stopConfigPoller } from './config/loader.js'
-import { resolveIdentity } from './identity/resolver.js'
-import { getGatewayClient, isAuthenticated } from './gateway/client.js'
-import * as authenticate from './tools/authenticate.js'
+import { verifyChain, ChainIntegrityViolation } from './audit/chain.js';
+import { getAllEntries, countEntries } from './audit/secondary.js';
+import { validateManifestHasNoDeleteTools } from './governance/constitutional.js';
+import { ping as pingGraphiti } from './graph/client.js';
+import { loadConfig, stopConfigPoller } from './config/loader.js';
+import { resolveIdentity } from './identity/resolver.js';
+import { getGatewayClient, isAuthenticated } from './gateway/client.js';
+import * as authenticate from './tools/authenticate.js';
 
-import * as remember from './tools/remember.js'
-import * as recall from './tools/recall.js'
-import * as search from './tools/search.js'
-import * as forget from './tools/forget.js'
-import * as history from './tools/history.js'
-import * as review from './tools/review.js'
-import * as reflect from './tools/reflect.js'
-import * as exportTool from './tools/export.js'
-import * as pending from './tools/pending.js'
+import * as remember from './tools/remember.js';
+import * as recall from './tools/recall.js';
+import * as search from './tools/search.js';
+import * as forget from './tools/forget.js';
+import * as history from './tools/history.js';
+import * as review from './tools/review.js';
+import * as reflect from './tools/reflect.js';
+import * as exportTool from './tools/export.js';
+import * as pending from './tools/pending.js';
+import * as configUpload from './tools/config-upload.js';
 
 // ── Gateway URL default ────────────────────────────────────────────────────────
 // The MCP always communicates with a Quorum gateway over HTTP.
 // Engineers running the local Docker stack get http://localhost:3001 by default.
 // Enterprise teams set QUORUM_GATEWAY_URL to their central Quorum instance.
 // The .quorum project file may also set this before we reach this line.
-process.env.QUORUM_GATEWAY_URL ??= 'http://localhost:3001'
-console.error(`[Quorum] Gateway: ${process.env.QUORUM_GATEWAY_URL}`)
-console.error('[Quorum] ℹ  Not authenticated — call authenticate() to log in via GitHub OAuth')
+process.env.QUORUM_GATEWAY_URL ??= 'http://localhost:3001';
+console.error(`[Quorum] Gateway: ${process.env.QUORUM_GATEWAY_URL}`);
+console.error(
+  '[Quorum] ℹ  Not authenticated — call authenticate() to log in via GitHub OAuth',
+);
 
 // ── MCP Server ─────────────────────────────────────────────────────────────────
 
 const server = new McpServer({
   name: 'quorum',
   version: '0.2.0',
-})
+});
 
 const tools = [
-  { name: 'remember',     def: remember },
-  { name: 'recall',       def: recall },
-  { name: 'search',       def: search },
-  { name: 'forget',       def: forget },
-  { name: 'history',      def: history },
-  { name: 'review',       def: review },
-  { name: 'reflect',      def: reflect },
-  { name: 'export',       def: exportTool },
-  { name: 'pending',      def: pending },
   { name: 'authenticate', def: authenticate },
-]
+  { name: 'config_upload', def: configUpload },
+  { name: 'search', def: search },
+  { name: 'remember', def: remember },
+  { name: 'recall', def: recall },
+  { name: 'forget', def: forget },
+  { name: 'history', def: history },
+  { name: 'review', def: review },
+  { name: 'reflect', def: reflect },
+  { name: 'export', def: exportTool },
+  { name: 'pending', def: pending },
+];
+
+/**
+ * Resolve project context fresh on every tool call — stateless, no env mutation.
+ *
+ * Resolution order:
+ *   1. MCP roots (Claude Code workspace dir) — walk up for .quorum file
+ *   2. PWD / cwd — walk up for .quorum file
+ *   3. Explicit env vars (QUORUM_PROJECT_ID / QUORUM_GROUP_ID)
+ *
+ * @returns {Promise<{ projectId: string, gatewayUrl: string } | null>}
+ */
+async function resolveCtx() {
+  // 1. Try MCP roots (Claude Code sends workspace dir per session — safe for parallel sessions)
+  try {
+    const result = await Promise.race([
+      server.server.listRoots(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('listRoots timeout')), 500)),
+    ])
+    for (const root of result.roots ?? []) {
+      const uri = root.uri ?? ''
+      if (!uri.startsWith('file://')) continue
+      const dir = decodeURIComponent(uri.slice('file://'.length))
+      const cfg = findAndLoadQuorumFile(dir)
+      if (cfg) {
+        log.debug('resolveCtx: resolved from MCP roots', { dir, projectId: cfg.project_id, gatewayUrl: cfg.gateway_url })
+        return { projectId: cfg.project_id.trim(), gatewayUrl: cfg.gateway_url }
+      }
+    }
+  } catch (err) {
+    log.debug('resolveCtx: listRoots failed', { error: err.message })
+  }
+
+  // 2. Fall back to PWD / cwd (for when claude launched from project dir)
+  for (const dir of [process.env.PWD, process.cwd()].filter(Boolean)) {
+    const cfg = findAndLoadQuorumFile(dir)
+    if (cfg) {
+      log.debug('resolveCtx: resolved from cwd', { dir, projectId: cfg.project_id, gatewayUrl: cfg.gateway_url })
+      return { projectId: cfg.project_id.trim(), gatewayUrl: cfg.gateway_url }
+    }
+  }
+
+  // 3. Fall back to explicit env vars (CI/enterprise contexts)
+  const projectId  = process.env.QUORUM_PROJECT_ID?.trim() ?? process.env.QUORUM_GROUP_ID?.trim() ?? null
+  const gatewayUrl = process.env.QUORUM_GATEWAY_URL ?? null
+  if (projectId) {
+    log.debug('resolveCtx: resolved from env vars', { projectId, gatewayUrl })
+    return { projectId, gatewayUrl: gatewayUrl ?? 'http://localhost:3001' }
+  }
+
+  log.warn('resolveCtx: no project context found — no .quorum file and no env vars set')
+  return null
+}
 
 /**
  * Register all tools with the MCP server.
@@ -87,170 +141,237 @@ const tools = [
  */
 function registerTools(identity) {
   for (const { name, def } of tools) {
-    server.tool(name, def.schema.shape ?? def.schema, async (input) => {
+    server.tool(name, def.schema.shape ?? def.schema, async input => {
+      log.startCall(name)
       try {
-        // Resolve at call time — picks up any token injected by authenticate()
-        const activePool = getGatewayClient()
+        // Resolve fresh ctx on every call — stateless, no env mutation.
+        // Each Claude Code session has its own MCP server process + stdio pipe,
+        // so listRoots() returns this session's directory — safe for parallel sessions.
+        log.info(`tool:${name}`, { input })
+        const ctx = await resolveCtx();
 
-        // Gate all tools behind authentication except authenticate() itself
-        if (process.env.QUORUM_GATEWAY_URL && !isAuthenticated() && name !== 'authenticate') {
+        // Gate 1: no project context — .quorum file missing and no env fallback
+        if (!ctx && name !== 'authenticate' && name !== 'config_upload') {
           return {
-            content: [{
-              type: 'text',
-              text: JSON.stringify({
-                error:   'not_authenticated',
-                message: 'Not authenticated with the Quorum gateway. Call authenticate() to log in via GitHub OAuth.',
-                hint:    'authenticate() will open your browser to complete the GitHub OAuth flow.',
-              }),
-            }],
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  error: 'no_project_context',
+                  message:
+                    'No .quorum file found in this workspace. Quorum cannot be used until this project is onboarded.',
+                  hint: 'Run the /quorum onboard skill to connect this project to Quorum. This creates the .quorum file and uploads the project config to the gateway.',
+                  debug_log: log.path,
+                }),
+              },
+            ],
             isError: true,
-          }
+          };
         }
 
-        const result = await def.handler(activePool, input, identity)
+        // Gate 2: project context known but not yet authenticated (gateway mode only)
+        if (ctx?.gatewayUrl && !isAuthenticated() && name !== 'authenticate') {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  error: 'not_authenticated',
+                  message:
+                    'Not authenticated with the Quorum gateway. Call authenticate() to log in via GitHub OAuth.',
+                  hint: 'authenticate() will open your browser to complete the GitHub OAuth flow.',
+                  debug_log: log.path,
+                }),
+              },
+            ],
+            isError: true,
+          };
+        }
+
+        // Resolve gateway client from ctx URL (or env fallback inside getGatewayClient)
+        const activePool = getGatewayClient(ctx?.gatewayUrl);
+
+        // Inject project scope — v0.3: project travels as X-Quorum-Project header, not JWT claim
+        if (activePool?.setProjectId) activePool.setProjectId(ctx?.projectId ?? null)
+
+        const result = await def.handler(activePool, input, identity, ctx);
         return {
           content: [
             {
               type: 'text',
-              text: typeof result === 'string' ? result : JSON.stringify(result, null, 2),
+              text:
+                typeof result === 'string'
+                  ? result
+                  : JSON.stringify(result, null, 2),
             },
           ],
-        }
+        };
       } catch (err) {
+        log.error(`tool:${name} failed`, { error: err.message, stack: err.stack })
         return {
-          content: [{ type: 'text', text: `Error: ${err.message}` }],
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              error: err.message,
+              debug_log: log.path,
+            }),
+          }],
           isError: true,
-        }
+        };
+      } finally {
+        log.endCall()
       }
-    })
+    });
   }
 }
 
 // ── Startup ────────────────────────────────────────────────────────────────────
 
 async function verifyStoreSync() {
-  const gw = getGatewayClient()
-  if (!gw) return  // not yet authenticated — skip
-  const count = await gw.countEntries().catch(() => -1)
+  const gw = getGatewayClient();
+  if (!gw) return; // not yet authenticated — skip
+  const count = await gw.countEntries().catch(() => -1);
   if (count === -1) {
-    console.error('[Quorum] WARNING: Could not reach audit store via gateway')
+    console.error('[Quorum] WARNING: Could not reach audit store via gateway');
   }
 }
 
 async function startup() {
-  console.error('[Quorum] Starting up...')
+  console.error('[Quorum] Starting up...');
 
   // 1. Verify audit chain integrity — via gateway (non-fatal if not yet authenticated)
   try {
-    const gw = getGatewayClient()
-    const entries = gw ? await gw.getAllEntries({}).catch(() => []) : []
+    const gw = getGatewayClient();
+    const entries = gw ? await gw.getAllEntries({}).catch(() => []) : [];
     if (entries.length > 0) {
-      const result = verifyChain(entries)
-      console.error(`[Quorum] ✓ Audit chain verified (${result.entries} entries)`)
+      const result = verifyChain(entries);
+      console.error(
+        `[Quorum] ✓ Audit chain verified (${result.entries} entries)`,
+      );
     } else {
-      console.error('[Quorum] ✓ Audit chain empty — fresh start or not yet authenticated')
+      console.error(
+        '[Quorum] ✓ Audit chain empty — fresh start or not yet authenticated',
+      );
     }
   } catch (err) {
     if (err instanceof ChainIntegrityViolation) {
-      console.error(`[Quorum] FATAL: Audit chain integrity violation at position ${err.position}`)
-      console.error(`[Quorum] Expected: ${err.expected}`)
-      console.error(`[Quorum] Actual:   ${err.actual}`)
-      process.exit(1)
+      console.error(
+        `[Quorum] FATAL: Audit chain integrity violation at position ${err.position}`,
+      );
+      console.error(`[Quorum] Expected: ${err.expected}`);
+      console.error(`[Quorum] Actual:   ${err.actual}`);
+      process.exit(1);
     }
-    console.error('[Quorum] WARNING: Could not verify audit chain:', err.message)
+    console.error(
+      '[Quorum] WARNING: Could not verify audit chain:',
+      err.message,
+    );
   }
 
   // 2. Verify gateway is reachable (skip if not yet authenticated)
-  await verifyStoreSync()
+  await verifyStoreSync();
 
   // 3. Load config from S3 / local file / env fallback
   // Config must be loaded before identity resolution (identity maps roles from config)
   try {
-    const config = await loadConfig(null)
-    console.error(`[Quorum] ✓ Config loaded (project: ${config.project}, members: ${config.members.length})`)
+    const config = await loadConfig(null);
+    console.error(
+      `[Quorum] ✓ Config loaded (project: ${config.project}, members: ${config.members.length})`,
+    );
   } catch (err) {
-    console.error(`[Quorum] WARNING: Config load failed — using env defaults: ${err.message}`)
+    console.error(
+      `[Quorum] WARNING: Config load failed — using env defaults: ${err.message}`,
+    );
   }
 
   // 4. Resolve caller identity — once per session, injected into all tool calls
   // Attempts gateway identity (JWT-verified) first; falls back to local resolution
   // if not yet authenticated so the server can start without a valid session.
-  const activeGatewayClient = getGatewayClient()
-  let identity
+  const activeGatewayClient = getGatewayClient();
+  let identity;
   try {
     identity = activeGatewayClient
       ? await activeGatewayClient.getIdentity()
-      : await resolveIdentity()
+      : await resolveIdentity();
   } catch {
-    identity = await resolveIdentity()
+    identity = await resolveIdentity();
   }
-  console.error(`[Quorum] ✓ Identity resolved: ${identity.name} (method: ${identity.method}, role: ${identity.role ?? 'none'})`)
+  console.error(
+    `[Quorum] ✓ Identity resolved: ${identity.name} (method: ${identity.method}, role: ${identity.role ?? 'none'})`,
+  );
 
   // 5. Validate MCP manifest has no delete-capable tools
-  validateManifestHasNoDeleteTools(tools.map((t) => ({ name: t.name })))
-  console.error('[Quorum] ✓ Tool manifest validated (no delete tools)')
+  validateManifestHasNoDeleteTools(tools.map(t => ({ name: t.name })));
+  console.error('[Quorum] ✓ Tool manifest validated (no delete tools)');
 
   // 6. Register tools with identity in closure
-  registerTools(identity)
+  registerTools(identity);
 
   // 7. Start health HTTP endpoint
-  startHealthServer()
+  startHealthServer();
 
   // 8. Connect MCP transport
-  const transport = new StdioServerTransport()
-  await server.connect(transport)
-  console.error('[Quorum] ✓ MCP server connected via stdio')
-  console.error(`[Quorum] Ready — ${tools.length} tools registered`)
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+  console.error('[Quorum] ✓ MCP server connected via stdio');
+  console.error(`[Quorum] Ready — ${tools.length} tools registered`);
 }
 
 // ── Health HTTP server ─────────────────────────────────────────────────────────
 
 function startHealthServer() {
-  const port = parseInt(process.env.QUORUM_PORT ?? '8000', 10)
+  const port = parseInt(process.env.QUORUM_PORT ?? '8000', 10);
 
   const httpServer = createServer(async (req, res) => {
     if (req.url !== '/health' && req.url !== '/') {
-      res.writeHead(404)
-      res.end('Not found')
-      return
+      res.writeHead(404);
+      res.end('Not found');
+      return;
     }
 
     const [graphConnected, auditConnected] = await Promise.all([
       pingGraphiti(),
-      getGatewayClient()?.ping().then(() => true).catch(() => false) ?? false,
-    ])
+      getGatewayClient()
+        ?.ping()
+        .then(() => true)
+        .catch(() => false) ?? false,
+    ]);
 
-    const status = graphConnected && auditConnected ? 'healthy' : 'degraded'
-    const code = status === 'healthy' ? 200 : 503
+    const status = graphConnected && auditConnected ? 'healthy' : 'degraded';
+    const code = status === 'healthy' ? 200 : 503;
 
-    res.writeHead(code, { 'Content-Type': 'application/json' })
-    res.end(JSON.stringify({
-      status,
-      graph: graphConnected ? 'connected' : 'unavailable',
-      audit: auditConnected ? 'connected' : 'unavailable',
-      timestamp: new Date().toISOString(),
-    }))
-  })
+    res.writeHead(code, { 'Content-Type': 'application/json' });
+    res.end(
+      JSON.stringify({
+        status,
+        graph: graphConnected ? 'connected' : 'unavailable',
+        audit: auditConnected ? 'connected' : 'unavailable',
+        timestamp: new Date().toISOString(),
+      }),
+    );
+  });
 
   httpServer.listen(port, () => {
-    console.error(`[Quorum] ✓ Health endpoint: http://localhost:${port}/health`)
-  })
+    console.error(
+      `[Quorum] ✓ Health endpoint: http://localhost:${port}/health`,
+    );
+  });
 }
 
 // ── Graceful shutdown ──────────────────────────────────────────────────────────
 
 async function shutdown() {
-  console.error('[Quorum] Shutting down...')
-  stopConfigPoller()
-  process.exit(0)
+  console.error('[Quorum] Shutting down...');
+  stopConfigPoller();
+  process.exit(0);
 }
 
-process.on('SIGTERM', shutdown)
-process.on('SIGINT', shutdown)
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
 
 // ── Run ────────────────────────────────────────────────────────────────────────
 
-startup().catch((err) => {
-  console.error('[Quorum] Startup failed:', err)
-  process.exit(1)
-})
+startup().catch(err => {
+  console.error('[Quorum] Startup failed:', err);
+  process.exit(1);
+});

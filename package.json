@@ -5,7 +5,7 @@
   "type": "module",
   "license": "Apache-2.0",
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=22.12.0"
   },
   "bin": {
     "quorum-mcp": "./dist/server.js",
@@ -22,6 +22,7 @@
   },
   "files": [
     "dist/",
+    "src/",
     "cli.js",
     "skill/",
     "hooks/"
@@ -37,7 +38,13 @@
     "test:watch": "vitest",
     "test:constitutional": "vitest run tests/constitutional",
     "test:coverage": "vitest run --coverage",
-    "prepublishOnly": "npm run build:all"
+    "prepublishOnly": "npm run build:all",
+    "prepare": "husky || true",
+    "release": "commit-and-tag-version",
+    "release:dry": "commit-and-tag-version --dry-run",
+    "release:minor": "commit-and-tag-version --release-as minor",
+    "release:major": "commit-and-tag-version --release-as major",
+    "release:patch": "commit-and-tag-version --release-as patch"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0",
@@ -46,8 +53,12 @@
     "zod": "4.3.6"
   },
   "devDependencies": {
+    "@commitlint/cli": "^21.0.0",
+    "@commitlint/config-conventional": "^21.0.0",
     "@vitest/coverage-v8": "4.1.2",
+    "commit-and-tag-version": "^12.7.3",
     "esbuild": "^0.25.0",
+    "husky": "^9.1.7",
     "vitest": "4.1.2"
   }
 }

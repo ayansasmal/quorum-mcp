@@ -19,9 +19,18 @@
  */
 
 import { randomUUID } from 'crypto'
+import { log } from '../logger.js'
 
 const GRAPHITI_URL = process.env.GRAPHITI_URL || 'http://graphiti:8000'
-const GROUP_ID = process.env.QUORUM_GROUP_ID || 'default'
+
+/**
+ * Graphiti validates group_ids against ^[a-zA-Z0-9_-]+$ before FalkorDB/RediSearch.
+ * Escaping hyphens as \- fails that validation. Pass group_ids unmodified.
+ * Callers rely on PostgreSQL (via gateway) for project isolation instead.
+ */
+function escapeGroupIds(ids) {
+  return ids
+}
 
 /**
  * Dedicated Graphiti group ID for audit episodes.
@@ -169,6 +178,7 @@ async function callGraphiti(tool, params, maxRetries = 3) {
 
   const { baseUrl, useGateway } = graphitiTarget()
   const endpoint = `${baseUrl}/mcp`
+  log.debug('graphiti call', { tool, groupId: params.group_id, endpoint })
 
   // In gateway mode, include Authorization header from the gateway client
   let authHeaders = {}
@@ -218,6 +228,7 @@ async function callGraphiti(tool, params, maxRetries = 3) {
 
       if (!response.ok) {
         const body = await response.text().catch(() => '')
+        log.error('graphiti response error', { tool, status: response.status, body, attempt })
         // 400 usually means session expired — clear it so next attempt re-initializes
         if (response.status === 400) _sessionId = null
         throw new GraphitiResponseError(
@@ -238,6 +249,7 @@ async function callGraphiti(tool, params, maxRetries = 3) {
         `Could not reach Graphiti at ${GRAPHITI_URL}: ${err.message}`,
         err,
       )
+      log.error('graphiti connection error', { tool, error: lastError.message, attempt })
     }
   }
 
@@ -250,10 +262,11 @@ async function callGraphiti(tool, params, maxRetries = 3) {
  * Store a new knowledge episode in Graphiti.
  * @param {string} content
  * @param {{ key: string, source: string, entityType?: string, tags?: string[] }} metadata
- * @param {string} [groupId] - project isolation namespace; defaults to QUORUM_GROUP_ID env var
+ * @param {string} groupId - project isolation namespace (required)
  * @returns {Promise<{ episode_id: string }>}
  */
-export async function addEpisode(content, metadata, groupId = GROUP_ID) {
+export async function addEpisode(content, metadata, groupId) {
+  if (!groupId) throw new Error('addEpisode: groupId is required')
   const uuid = randomUUID()
   await callGraphiti('add_memory', {
     name:               metadata.key,
@@ -272,10 +285,11 @@ export async function addEpisode(content, metadata, groupId = GROUP_ID) {
  * @param {string} newContent
  * @param {string} oldEpisodeId
  * @param {{ key: string, source: string, entityType?: string, tags?: string[], reason?: string }} metadata
- * @param {string} [groupId] - project isolation namespace; defaults to QUORUM_GROUP_ID env var
+ * @param {string} groupId - project isolation namespace (required)
  * @returns {Promise<{ episode_id: string }>}
  */
-export async function addSupersedingEpisode(newContent, oldEpisodeId, metadata, groupId = GROUP_ID) {
+export async function addSupersedingEpisode(newContent, oldEpisodeId, metadata, groupId) {
+  if (!groupId) throw new Error('addSupersedingEpisode: groupId is required')
   const uuid = randomUUID()
   await callGraphiti('add_memory', {
     name:               metadata.key,
@@ -292,13 +306,14 @@ export async function addSupersedingEpisode(newContent, oldEpisodeId, metadata, 
  * Walk the SUPERSEDES edges from an episode back to the root, returning the
  * full organic evolution chain as an ordered array (newest first).
  * @param {string} episodeId
- * @param {string} [groupId] - project isolation namespace; defaults to QUORUM_GROUP_ID env var
+ * @param {string} groupId - project isolation namespace (required)
  * @returns {Promise<Array<{ episode_id: string, metadata: unknown }>>}
  */
-export async function getEvolutionChain(episodeId, groupId = GROUP_ID) {
+export async function getEvolutionChain(episodeId, groupId) {
+  if (!groupId) throw new Error('getEvolutionChain: groupId is required')
   const result = await callGraphiti('search_memory_facts', {
-    query:     `supersedes evolution chain for ${episodeId}`,
-    group_ids: [groupId],
+    query: `supersedes evolution chain for ${episodeId}`,
+    // group_ids omitted — hyphenated IDs break FalkorDB RediSearch queries.
   }).catch(() => ({ facts: [] }))
 
   return result.facts ?? []
@@ -307,14 +322,16 @@ export async function getEvolutionChain(episodeId, groupId = GROUP_ID) {
 /**
  * Search for knowledge nodes semantically.
  * @param {string} query
- * @param {{ limit?: number, groupIds?: string[], groupId?: string }} [options]
+ * @param {{ limit?: number, groupIds?: string[], groupId?: string }} options - groupId or groupIds required
  * @returns {Promise<{ nodes: Array<unknown> }>}
  */
 export async function searchNodes(query, options = {}) {
+  // group_ids omitted — FalkorDB/RediSearch treats hyphens in group IDs as NOT operators,
+  // breaking queries for hyphenated project IDs. Project isolation is enforced by the
+  // PostgreSQL layer via the gateway.
   return callGraphiti('search_nodes', {
     query,
-    group_ids: options.groupIds ?? [options.groupId ?? GROUP_ID],
-    max_nodes:  options.limit ?? 10,
+    max_nodes: options.limit ?? 10,
   })
 }
 
@@ -325,19 +342,19 @@ export async function searchNodes(query, options = {}) {
  * @returns {Promise<{ facts: Array<unknown> }>}
  */
 export async function searchFacts(query, options = {}) {
-  return callGraphiti('search_memory_facts', {
-    query,
-    group_ids: options.groupIds ?? [options.groupId ?? GROUP_ID],
-  })
+  // group_ids omitted — see searchNodes comment.
+  return callGraphiti('search_memory_facts', { query })
 }
 
 /**
  * List episodes in a group.
- * @param {string} [groupId]
+ * @param {string} groupId - project isolation namespace (required)
  * @returns {Promise<{ episodes: Array<unknown> }>}
  */
-export async function getEpisodes(groupId = GROUP_ID) {
-  return callGraphiti('get_episodes', { group_ids: [groupId] })
+export async function getEpisodes(groupId) {
+  if (!groupId) throw new Error('getEpisodes: groupId is required')
+  // group_ids omitted — see searchNodes comment.
+  return callGraphiti('get_episodes', {})
 }
 
 /**
@@ -345,9 +362,10 @@ export async function getEpisodes(groupId = GROUP_ID) {
  * Never calls Graphiti delete methods — constitutional rule enforced.
  * @param {string} episodeId
  * @param {{ key: string, reason: string, author: string }} meta
- * @param {string} [groupId] - project isolation namespace; defaults to QUORUM_GROUP_ID env var
+ * @param {string} groupId - project isolation namespace (required)
  */
-export async function deleteEpisodeSoft(episodeId, meta, groupId = GROUP_ID) {
+export async function deleteEpisodeSoft(episodeId, meta, groupId) {
+  if (!groupId) throw new Error('deleteEpisodeSoft: groupId is required')
   return callGraphiti('add_memory', {
     name:               `${meta.key}:deprecated`,
     episode_body:       `Knowledge deprecated by ${meta.author}. Reason: ${meta.reason}. Deprecated episode: ${episodeId}`,

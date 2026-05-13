@@ -222,7 +222,7 @@ signal quality. See [`references/knowledge-guidelines.md`](references/knowledge-
 
 When a conflict is detected (`conflict_detected` in response or in `pending()`):
 
-**Do not just dump the raw conflict.** Read the `brief` field in the response — it contains
+**Do not just dump the raw conflict.** Read the `analysis` field in the response — it contains
 an LLM analysis of the contradiction. Use it to inform your suggested resolution. Brief
 the human like this:
 
@@ -230,7 +230,7 @@ the human like this:
 > - **Existing** (by @senior-architect, 3 months ago, confidence 0.90): 'Use session tokens'
 > - **Incoming** (your current decision, confidence 0.85): 'Use JWT for Lambda services'
 >
-> Analysis: *[brief field content — e.g., "existing rule predates Lambda adoption; new rule is likely scoped to Lambda contexts"]*
+> Analysis: *[`analysis` field — e.g., "existing rule predates Lambda adoption; new rule is likely scoped to Lambda contexts"]*
 >
 > Suggested resolution: **coexist_split** — the existing rule covers ECS services,
 > the new one covers Lambda. Want me to apply that?"
@@ -279,44 +279,37 @@ echo ${QUORUM_GATEWAY_URL:-"(not set — direct mode)"}
 
 ### Gateway mode — auth flow
 
-Run this **without asking** — just inform and proceed:
+Auth is **automatic** — every tool checks for a valid token and triggers the flow
+if missing. You do not need to call `authenticate()` manually.
 
-```
-1. Say: "Quorum auth needed — authenticating, back in a moment."
+When auth is needed:
+1. Say: *"Quorum auth needed — a browser tab will open, back in a moment."*
+2. The MCP server opens the browser to the gateway login page automatically
+3. The engineer signs in with GitHub — the browser shows "Quorum authenticated."
+4. Control returns to Claude Code — retry the tool that triggered the flow
+5. Say: *"Auth done — continuing."*
 
-2. Read QUORUM_GATEWAY_URL (default: http://localhost:3001)
-
-3. Open in browser (use mcp-playwright if available):
-     {QUORUM_GATEWAY_URL}/auth/github
-
-4. GitHub OAuth flow completes. Dashboard URL becomes:
-     http://localhost:3002/login#oauth=gho_<token>
-
-5. Extract: window.location.hash → parse "oauth=" → gho_<token>
-
-6. If project_id is not obvious from context, ask once:
-   "Which project should I authenticate with?"
-
-7. authenticate({ github_token: "gho_<token>", project_id: "<id>" })
-   Token lives in MCP process memory — never written to disk.
-
-8. Retry the operation that triggered the failure.
-
-9. Say: "Auth done — continuing."
-```
+The token is in-memory only. If the MCP server restarts, auth is needed again on
+next tool use. See [`references/login.md`](references/login.md) for the full flow,
+token contents, project mismatch handling, and error reference.
 
 ### Proactive auth at session start (gateway mode only)
 
-If `QUORUM_GATEWAY_URL` is set, run the auth flow **before** Step 1 (`pending()`),
-not after a failure. A 401 mid-session interrupts the engineer's flow — auth first
-removes that risk entirely.
+If `QUORUM_GATEWAY_URL` is set, check auth state **before** Step 1 (`pending()`):
+
+```
+authenticate()   ← returns already_authenticated (fast) or opens browser
+```
+
+A 401 mid-session interrupts the engineer's flow — auth first removes that risk.
 
 ### Auth failure signals
 
 | Signal | Action |
 |--------|--------|
-| `401 Unauthorized` or `jwt_expired` | Run re-auth flow above, then retry |
-| `QUORUM_GITHUB_TOKEN` not set and mcp-playwright unavailable | Tell human: *"Set `QUORUM_GITHUB_TOKEN` in your shell profile (GitHub PAT, scope: `read:user`), then restart Claude Code."* |
+| `401 Unauthorized` or `jwt_expired` | Call `authenticate()`, then retry |
+| `project_mismatch` | Engineer not in project config — escalate to principal architect |
+| `auth_timeout` | Browser tab not completed — call the tool again to restart |
 
 ---
 
@@ -327,15 +320,15 @@ removes that risk entirely.
 Follow the full 10-phase protocol: [`references/onboarding.md`](references/onboarding.md).
 
 **Phase overview:**
-1. Check for existing setup (`.quorum` file)
+1. Check for existing setup (`.quorum` file) — hard-stop if already onboarded
 2. Gather team info — project ID, members, domains, gateway URL
 3. Create + validate `<group_id>.quorum.json` config
-4. Upload config to S3
-5. Create `.quorum` discovery file via CLI
-6. Set identity (`QUORUM_GITHUB_TOKEN`) + register MCP server
-7. Install skill at user level (`~/.claude/skills/quorum/` — run `npm run skill:install`)
+4. Upload config via `config_upload({ config_path: "<id>.quorum.json" })` MCP tool
+5. Create `.quorum` discovery file (`quorum init`)
+6. Share install instructions with team (`npm install -g @as-quorum/mcp`)
+7. Verify own skill + hooks are present
 8. **Ingest existing knowledge** — CLAUDE.md, MEMORY.md, session transcripts → DRAFT entries
-9. Commit `.quorum` discovery file (config is gitignored — lives in S3)
+9. Commit `.quorum` (config is gitignored — lives in S3); add `.quorum-reflected`, `.quorum-offline.log` to `.gitignore`
 10. Verify connection with a fresh session
 
 **Phase 8 is the highest-value step** — it bootstraps the team's memory from institutional
@@ -500,7 +493,7 @@ Violations are **rejected**, not warned:
 | Claude writes are always DRAFT | `reflect()` and `remember()` as agent always enter DRAFT |
 | `triggered_by` always set | Set automatically by the server — if you see a `triggered_by: null` error, the server version is outdated |
 | Atomic ACTIVE transition | If an entry is stuck in PENDING_ACTIVE state, report to human — do not retry manually |
-| Bidirectional audit↔version | If `history()` returns a version with no `created_by_audit`, the audit chain is broken — escalate to human |
+| Bidirectional audit↔version | If `history()` returns a version with no `created_by_audit`, the audit chain is broken — escalate to human. Do not attempt to repair it manually or call `forget()` to clean up. |
 
 ---
 
@@ -613,3 +606,4 @@ Load when you need full detail:
 | [`references/conflict-resolution.md`](references/conflict-resolution.md) | Full conflict brief format, all resolution options with examples |
 | [`references/knowledge-guidelines.md`](references/knowledge-guidelines.md) | What to store, quality bar, over-extraction guard, discovery vs. reflect() |
 | [`references/onboarding.md`](references/onboarding.md) | Full 10-phase project onboarding protocol |
+| [`references/login.md`](references/login.md) | Auth flow, token contents, project mismatch, error reference |

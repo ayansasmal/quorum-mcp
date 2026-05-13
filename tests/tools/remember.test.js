@@ -92,6 +92,8 @@ const anonIdentity = { name: 'anonymous', team: null, role: null, base_confidenc
 // Minimal pg stub — tool code must not call pg.query() directly (scanner enforces this)
 const mockPg = {}
 
+const testCtx = { projectId: 'test-project', gatewayUrl: 'http://localhost:3001' }
+
 // ── First version ─────────────────────────────────────────────────────────────
 
 describe('remember — first version (v1)', () => {
@@ -115,7 +117,7 @@ describe('remember — first version (v1)', () => {
       key: 'token-strategy',
       content: 'Use JWT for all services',
       confidence: 0.85,
-    }, humanIdentity)
+    }, humanIdentity, testCtx)
 
     expect(result.status).toBe('stored')
     expect(result.version).toBe(1)
@@ -130,10 +132,24 @@ describe('remember — first version (v1)', () => {
       topic: 'auth',
       key: 'token-strategy',
       content: 'Use JWT for all services',
-    }, humanIdentity)
+    }, humanIdentity, testCtx)
 
     expect(addEpisode).toHaveBeenCalledOnce()
     expect(addSupersedingEpisode).not.toHaveBeenCalled()
+  })
+
+  it('populates summary in insertVersion so content survives Graphiti/FalkorDB wipes', async () => {
+    const { handler } = await import('../../src/tools/remember.js')
+    const { insertVersion } = await import('../../src/graph/queries.js')
+
+    await handler(mockPg, {
+      topic: 'auth',
+      key: 'token-strategy',
+      content: 'Use JWT for all services',
+    }, humanIdentity, testCtx)
+
+    const insertCall = vi.mocked(insertVersion).mock.calls[0][1]
+    expect(insertCall.summary).toBe('Use JWT for all services')
   })
 
   it('creates v1 as DRAFT when identity is claude', async () => {
@@ -145,7 +161,7 @@ describe('remember — first version (v1)', () => {
       key: 'claude-pattern',
       content: 'Some knowledge extracted from task',
       confidence: 0.75,
-    }, claudeIdentity)
+    }, claudeIdentity, testCtx)
 
     const insertCall = vi.mocked(insertVersion).mock.calls[0][1]
     expect(insertCall.status).toBe('DRAFT')
@@ -159,7 +175,7 @@ describe('remember — first version (v1)', () => {
       topic: 'auth',
       key: 'anon-write',
       content: 'Some knowledge from unknown author',
-    }, anonIdentity)
+    }, anonIdentity, testCtx)
 
     const insertCall = vi.mocked(insertVersion).mock.calls[0][1]
     expect(insertCall.status).toBe('DRAFT')
@@ -175,7 +191,7 @@ describe('remember — first version (v1)', () => {
       content: 'Extracted from task completion',
       triggered_by: 'reflect',
       confidence: 0.55,
-    }, claudeIdentity)
+    }, claudeIdentity, testCtx)
 
     const insertCall = vi.mocked(insertVersion).mock.calls[0][1]
     expect(insertCall.status).toBe('DRAFT')
@@ -190,7 +206,7 @@ describe('remember — first version (v1)', () => {
       key: 'token-strategy',
       content: 'Use JWT',
       tags: ['Auth:Token', '  JWT  ', 'auth:token', 'API'],
-    }, humanIdentity)
+    }, humanIdentity, testCtx)
 
     expect(normalizeTags).toHaveBeenCalledWith(['Auth:Token', '  JWT  ', 'auth:token', 'API'])
   })
@@ -238,7 +254,7 @@ describe('remember — superseding existing version', () => {
         content: 'Use JWT for all services',
         confidence: 0.85,
         // no reason
-      }, humanIdentity),
+      }, humanIdentity, testCtx),
     ).rejects.toThrow(ConstitutionalViolation)
   })
 
@@ -252,7 +268,7 @@ describe('remember — superseding existing version', () => {
       content: 'Use JWT for all services',
       confidence: 0.85,
       reason: 'Lambda services do not support session tokens',
-    }, humanIdentity)
+    }, humanIdentity, testCtx)
 
     expect(addSupersedingEpisode).toHaveBeenCalledOnce()
     expect(addEpisode).not.toHaveBeenCalled()
@@ -267,7 +283,7 @@ describe('remember — superseding existing version', () => {
       content: 'Use JWT for all services',
       confidence: 0.85,
       reason: 'Lambda services do not support session tokens',
-    }, humanIdentity)
+    }, humanIdentity, testCtx)
 
     expect(result.status).toBe('stored')
     expect(result.version).toBe(2)
@@ -283,7 +299,7 @@ describe('remember — superseding existing version', () => {
       key: 'token-strategy',
       content: 'Use JWT for all services',
       reason: 'Lambda does not support sessions',
-    }, humanIdentity)
+    }, humanIdentity, testCtx)
 
     expect(transitionVersionStatus).toHaveBeenCalledOnce()
     const call = vi.mocked(transitionVersionStatus).mock.calls[0]
@@ -344,7 +360,7 @@ describe('remember — conflict detection', () => {
       content: 'Use pool size 50 for batch processing',
       confidence: 0.5,
       reason: 'High concurrency batch jobs need more connections',
-    }, humanIdentity)
+    }, humanIdentity, testCtx)
 
     expect(result.status).toBe('conflict_detected')
     expect(result.conflict_id).toBeDefined()
@@ -386,7 +402,7 @@ describe('remember — conflict detection', () => {
       content: 'Pool size 50 for batch processing nodes',
       confidence: 0.7,
       reason: 'Batch nodes have different concurrency requirements',
-    }, humanIdentity)
+    }, humanIdentity, testCtx)
 
     expect(result.possible_split).toBe(true)
     expect(result.split_suggestion).toBe('First for OLTP services, second for batch jobs')

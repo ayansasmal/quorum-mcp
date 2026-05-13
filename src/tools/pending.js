@@ -35,9 +35,13 @@ export const schema = z.object({
  * @param {import('pg').Pool} pg
  * @param {z.infer<typeof schema>} input
  * @param {import('../identity/resolver.js').ResolvedIdentity} identity
+ * @param {{ projectId: string, gatewayUrl: string } | null} [ctx]
  * @returns {Promise<Record<string, unknown>>}
  */
-export async function handler(pg, input, identity) {
+export async function handler(pg, input, identity, ctx) {
+  const projectId = ctx?.projectId
+  if (!projectId) throw new Error('pending: ctx.projectId is required — ensure a .quorum file exists in this workspace')
+
   const pipelineResult = await withAuditPipeline(
     pg,
     {
@@ -48,8 +52,8 @@ export async function handler(pg, input, identity) {
     },
     async () => {
       const [conflictBriefs, draftReviews] = await Promise.all([
-        fetchConflictBriefs(pg, input),
-        fetchDraftReviews(pg, input),
+        fetchConflictBriefs(pg, input, projectId),
+        fetchDraftReviews(pg, input, projectId),
       ])
 
       return {
@@ -78,15 +82,15 @@ export async function handler(pg, input, identity) {
  * @param {z.infer<typeof schema>} input
  * @returns {Promise<Array<Record<string, unknown>>>}
  */
-async function fetchConflictBriefs(pg, input) {
+async function fetchConflictBriefs(pg, input, projectId) {
   const statuses = input.include_stale ? ['pending', 'stale'] : ['pending']
-  const rows = await getPendingDecisions(pg, { topic: input.topic, statuses, decisionType: 'conflict' })
+  const rows = await getPendingDecisions(pg, { topic: input.topic, statuses, decisionType: 'conflict', projectId })
 
   const results = []
 
   for (const row of rows) {
     // Stale detection: compare current active version vs version at conflict creation
-    const currentActive = await getCurrentVersion(pg, row.conflict_topic, row.conflict_key)
+    const currentActive = await getCurrentVersion(pg, row.conflict_topic, row.conflict_key, projectId)
     const currentVersion = currentActive?.version ?? null
 
     let staleWarning = row.stale_warning
@@ -141,8 +145,8 @@ async function fetchConflictBriefs(pg, input) {
  * @param {z.infer<typeof schema>} input
  * @returns {Promise<Array<Record<string, unknown>>>}
  */
-async function fetchDraftReviews(pg, input) {
-  const rows = await getDraftVersions(pg, { topic: input.topic })
+async function fetchDraftReviews(pg, input, projectId) {
+  const rows = await getDraftVersions(pg, { topic: input.topic, projectId })
 
   let domainConfigs = {}
   try {

@@ -25,9 +25,14 @@ export const schema = z.object({
 /**
  * @param {import('pg').Pool} pg
  * @param {z.infer<typeof schema>} input
+ * @param {import('../identity/resolver.js').ResolvedIdentity} [identity]
+ * @param {{ projectId: string, gatewayUrl: string } | null} [ctx]
  * @returns {Promise<Record<string, unknown> | null>}
  */
-export async function handler(pg, input) {
+export async function handler(pg, input, identity, ctx) {
+  const projectId = ctx?.projectId
+  if (!projectId) throw new Error('history: ctx.projectId is required — ensure a .quorum file exists in this workspace')
+
   const pipelineResult = await withAuditPipeline(
     pg,
     {
@@ -38,7 +43,7 @@ export async function handler(pg, input) {
       key: input.key,
     },
     async () => {
-      const versions = await getVersionHistory(pg, input.topic, input.key)
+      const versions = await getVersionHistory(pg, input.topic, input.key, projectId)
 
       if (versions.length === 0) {
         return {
@@ -51,7 +56,7 @@ export async function handler(pg, input) {
       const latestVersion = versions[0] // newest first from getVersionHistory
       let evolutionChain = []
       if (latestVersion.graphiti_episode_id) {
-        evolutionChain = await getEvolutionChain(latestVersion.graphiti_episode_id).catch(() => [])
+        evolutionChain = await getEvolutionChain(latestVersion.graphiti_episode_id, projectId).catch(() => [])
       }
 
       // Build episode ID map from graph chain for enrichment

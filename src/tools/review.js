@@ -39,11 +39,14 @@ export const schema = z.object({
  * @param {import('pg').Pool} pg
  * @param {z.infer<typeof schema>} input
  * @param {import('../identity/resolver.js').ResolvedIdentity} identity
+ * @param {{ projectId: string, gatewayUrl: string } | null} [ctx]
  * @returns {Promise<Record<string, unknown>>}
  */
-export async function handler(pg, input, identity) {
+export async function handler(pg, input, identity, ctx) {
   const reviewer = identity?.name ?? 'anonymous'
   const reviewerTeam = identity?.team ?? null
+  const projectId = ctx?.projectId
+  if (!projectId) throw new Error('review: ctx.projectId is required — ensure a .quorum file exists in this workspace')
 
   // Constitutional Rule 3: note required — checked before pipeline
   enforceReasonRequired(input.note, 'review')
@@ -62,13 +65,13 @@ export async function handler(pg, input, identity) {
       // ── Resolve target version ────────────────────────────────────────────
       let targetVersion
       if (input.version != null) {
-        targetVersion = await getSpecificVersion(pg, input.topic, input.key, input.version)
+        targetVersion = await getSpecificVersion(pg, input.topic, input.key, input.version, projectId)
       } else {
-        const current = await getCurrentVersion(pg, input.topic, input.key)
+        const current = await getCurrentVersion(pg, input.topic, input.key, projectId)
         if (current?.status === KnowledgeStatus.DRAFT) {
           targetVersion = current
         } else {
-            targetVersion = await getLatestDraftVersion(pg, input.topic, input.key)
+            targetVersion = await getLatestDraftVersion(pg, input.topic, input.key, projectId)
         }
       }
 
@@ -101,7 +104,7 @@ export async function handler(pg, input, identity) {
       // ── Staleness detection ───────────────────────────────────────────────
       // If the ACTIVE version has advanced since this DRAFT was created (e.g. another
       // path activated a different version), warn the reviewer so they have current context.
-      const currentActive = await getCurrentVersion(pg, input.topic, input.key)
+      const currentActive = await getCurrentVersion(pg, input.topic, input.key, projectId)
       let staleWarning = null
       if (
         currentActive &&
@@ -129,14 +132,14 @@ export async function handler(pg, input, identity) {
 
       // ── approve / reject: state transition ───────────────────────────────
       const newStatus = input.action === 'approve' ? KnowledgeStatus.ACTIVE : KnowledgeStatus.REJECTED
-      await transitionVersionStatus(pg, input.topic, input.key, targetVersion.version, newStatus)
+      await transitionVersionStatus(pg, input.topic, input.key, targetVersion.version, newStatus, null, projectId)
 
       // GAP-21: on approve, increment approved_count for the entry author in this domain
       if (input.action === 'approve') {
         incrementDomainStat(pg, {
           author: targetVersion.author,
           domain: input.topic,
-          projectId: process.env.QUORUM_GROUP_ID ?? 'default',
+          projectId,
           field: 'approved_count',
         }).catch(() => {})
       }

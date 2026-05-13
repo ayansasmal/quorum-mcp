@@ -24,10 +24,10 @@ const LEGAL_TRANSITIONS = new Map([
  * @param {import('pg').Pool} pg
  * @param {string} topic
  * @param {string} key
- * @param {string} [projectId='default'] - Project scope (enforced by gateway)
+ * @param {string} projectId - Project scope (required)
  * @returns {Promise<Record<string, unknown> | null>}
  */
-export async function getCurrentVersion(pg, topic, key, projectId = 'default') {
+export async function getCurrentVersion(pg, topic, key, projectId) {
   if (typeof pg.getCurrentVersion === 'function') return pg.getCurrentVersion(topic, key)
   const result = await pg.query(
     `SELECT * FROM knowledge_versions
@@ -44,10 +44,10 @@ export async function getCurrentVersion(pg, topic, key, projectId = 'default') {
  * @param {string} topic
  * @param {string} key
  * @param {string} date - ISO date string
- * @param {string} [projectId='default']
+ * @param {string} projectId - required
  * @returns {Promise<Record<string, unknown> | null>}
  */
-export async function getVersionAtDate(pg, topic, key, date, projectId = 'default') {
+export async function getVersionAtDate(pg, topic, key, date, projectId) {
   if (typeof pg.getVersionAtDate === 'function') return pg.getVersionAtDate(topic, key, date)
   const result = await pg.query(
     `SELECT * FROM knowledge_versions
@@ -74,10 +74,10 @@ export async function getVersionAtDate(pg, topic, key, date, projectId = 'defaul
  * @param {import('pg').Pool} pg
  * @param {string} topic
  * @param {string} key
- * @param {string} [projectId='default']
+ * @param {string} projectId - required
  * @returns {Promise<Array<Record<string, unknown>>>}
  */
-export async function getVersionHistory(pg, topic, key, projectId = 'default') {
+export async function getVersionHistory(pg, topic, key, projectId) {
   if (typeof pg.getVersionHistory === 'function') return pg.getVersionHistory(topic, key)
   const result = await pg.query(
     `SELECT * FROM knowledge_versions
@@ -94,10 +94,10 @@ export async function getVersionHistory(pg, topic, key, projectId = 'default') {
  * @param {string} topic
  * @param {string} key
  * @param {number} version
- * @param {string} [projectId='default']
+ * @param {string} projectId - required
  * @returns {Promise<Record<string, unknown> | null>}
  */
-export async function getSpecificVersion(pg, topic, key, version, projectId = 'default') {
+export async function getSpecificVersion(pg, topic, key, version, projectId) {
   if (typeof pg.getSpecificVersion === 'function') return pg.getSpecificVersion(topic, key, version)
   const result = await pg.query(
     `SELECT * FROM knowledge_versions
@@ -114,10 +114,10 @@ export async function getSpecificVersion(pg, topic, key, version, projectId = 'd
  * @param {import('pg').Pool} pg
  * @param {string} topic
  * @param {string} key
- * @param {string} [projectId='default']
+ * @param {string} projectId - required
  * @returns {Promise<number>}
  */
-export async function getNextVersionNumber(pg, topic, key, projectId = 'default') {
+export async function getNextVersionNumber(pg, topic, key, projectId) {
   if (typeof pg.getNextVersionNumber === 'function') return pg.getNextVersionNumber(topic, key)
   const result = await pg.query(
     `SELECT COALESCE(MAX(version), 0) + 1 AS next_version
@@ -135,6 +135,7 @@ export async function getNextVersionNumber(pg, topic, key, projectId = 'default'
  * @returns {Promise<Record<string, unknown>>}
  */
 export async function insertVersion(pg, record) {
+  if (!record.project_id) throw new Error('insertVersion: record.project_id is required')
   if (typeof pg.insertVersion === 'function') return pg.insertVersion(record)
   const result = await pg.query(
     `INSERT INTO knowledge_versions (
@@ -169,9 +170,9 @@ export async function insertVersion(pg, record) {
       record.superseded_by_author  ?? null,
       record.superseded_at         ?? null,
       record.tags ?? [],
-      record.project_id ?? process.env.QUORUM_PROJECT_ID ?? 'default',
+      record.project_id,
       record.entity_type ?? 'unknown',
-      record.summary     ?? '',
+      record.content     ?? record.summary ?? '',
     ],
   )
   return result.rows[0]
@@ -182,10 +183,10 @@ export async function insertVersion(pg, record) {
  * Tag containment query uses the GIN index on the tags column.
  * @param {import('pg').Pool} pg
  * @param {string} tag - Normalized (lowercase, trimmed) tag to search for
- * @param {string} [projectId='default']
+ * @param {string} projectId - required
  * @returns {Promise<Array<Record<string, unknown>>>}
  */
-export async function getVersionsByTag(pg, tag, projectId = 'default') {
+export async function getVersionsByTag(pg, tag, projectId) {
   if (typeof pg.getVersionsByTag === 'function') return pg.getVersionsByTag(tag)
   const result = await pg.query(
     `SELECT * FROM knowledge_versions
@@ -207,10 +208,10 @@ export async function getVersionsByTag(pg, tag, projectId = 'default') {
  * @param {number} version
  * @param {string} newStatus
  * @param {{ supersededByVersion?: number, supersededByAuthor?: string } | null} [forwardLink]
- * @param {string} [projectId='default']
+ * @param {string} projectId - required
  * @returns {Promise<Record<string, unknown>>}
  */
-export async function transitionVersionStatus(pg, topic, key, version, newStatus, forwardLink = null, projectId = 'default') {
+export async function transitionVersionStatus(pg, topic, key, version, newStatus, forwardLink = null, projectId) {
   if (typeof pg.transitionVersionStatus === 'function') return pg.transitionVersionStatus(topic, key, version, newStatus, forwardLink)
   const current = await getSpecificVersion(pg, topic, key, version, projectId)
   if (!current) {
@@ -270,10 +271,11 @@ export async function insertVersionAuditLink(pg, record) {
  * @param {import('pg').Pool} pg
  * @param {string} topic
  * @param {string} key
- * @param {string} [projectId='default']
+ * @param {string} projectId - required
  * @returns {Promise<Record<string, unknown> | null>}
  */
-export async function getLatestDraftVersion(pg, topic, key, projectId = 'default') {
+export async function getLatestDraftVersion(pg, topic, key, projectId) {
+  if (typeof pg.getLatestDraftVersion === 'function') return pg.getLatestDraftVersion(topic, key)
   const result = await pg.query(
     `SELECT * FROM knowledge_versions
      WHERE project_id = $1 AND topic = $2 AND key = $3 AND status = 'DRAFT'
@@ -290,7 +292,8 @@ export async function getLatestDraftVersion(pg, topic, key, projectId = 'default
  * @param {{ topic?: string, projectId?: string }} [opts]
  * @returns {Promise<Array<Record<string, unknown>>>}
  */
-export async function getVersionsByStatus(pg, status, { topic, projectId = 'default' } = {}) {
+export async function getVersionsByStatus(pg, status, { topic, projectId } = {}) {
+  if (typeof pg.getVersionsByStatus === 'function') return pg.getVersionsByStatus(status, { topic })
   if (topic) {
     const result = await pg.query(
       `SELECT * FROM knowledge_versions
@@ -315,7 +318,8 @@ export async function getVersionsByStatus(pg, status, { topic, projectId = 'defa
  * @param {{ topic?: string, projectId?: string }} [opts]
  * @returns {Promise<Record<string, number>>}
  */
-export async function getVersionStatusCounts(pg, { topic, projectId = 'default' } = {}) {
+export async function getVersionStatusCounts(pg, { topic, projectId } = {}) {
+  if (typeof pg.getVersionStatusCounts === 'function') return pg.getVersionStatusCounts({ topic })
   const result = topic
     ? await pg.query(
         `SELECT status, COUNT(*)::int AS count FROM knowledge_versions
@@ -338,7 +342,7 @@ export async function getVersionStatusCounts(pg, { topic, projectId = 'default' 
  * @param {{ topic?: string, statuses?: string[], decisionType?: string, projectId?: string }} opts
  * @returns {Promise<Array<Record<string, unknown>>>}
  */
-export async function getPendingDecisions(pg, { topic, statuses = ['pending'], decisionType = 'conflict', projectId = 'default' } = {}) {
+export async function getPendingDecisions(pg, { topic, statuses = ['pending'], decisionType = 'conflict', projectId } = {}) {
   if (typeof pg.getPendingDecisions === 'function') return pg.getPendingDecisions({ topic, statuses, decisionType })
   if (topic) {
     const result = await pg.query(
@@ -364,7 +368,8 @@ export async function getPendingDecisions(pg, { topic, statuses = ['pending'], d
  * @param {{ topic?: string, projectId?: string }} [opts]
  * @returns {Promise<Array<Record<string, unknown>>>}
  */
-export async function getDraftVersions(pg, { topic, projectId = 'default' } = {}) {
+export async function getDraftVersions(pg, { topic, projectId } = {}) {
+  if (typeof pg.getDraftVersions === 'function') return pg.getDraftVersions({ topic })
   if (topic) {
     const result = await pg.query(
       `SELECT * FROM knowledge_versions
@@ -391,6 +396,13 @@ export async function getDraftVersions(pg, { topic, projectId = 'default' } = {}
  * @param {number} currentVersion
  */
 export async function markPendingDecisionStale(pg, conflictId, staleWarning, currentVersion) {
+  if (typeof pg.updatePendingDecision === 'function') {
+    return pg.updatePendingDecision(conflictId, {
+      status: 'stale',
+      stale_warning: staleWarning,
+      current_active_version: currentVersion,
+    })
+  }
   await pg.query(
     `UPDATE pending_decisions
      SET stale_warning = $1, current_active_version = $2, status = 'stale', updated_at = NOW()
@@ -404,10 +416,10 @@ export async function markPendingDecisionStale(pg, conflictId, staleWarning, cur
  * @param {import('pg').Pool} pg
  * @param {string} topic
  * @param {string} key
- * @param {string} [projectId='default']
+ * @param {string} projectId - required
  * @returns {Promise<number>}
  */
-export async function countPendingForKey(pg, topic, key, projectId = 'default') {
+export async function countPendingForKey(pg, topic, key, projectId) {
   if (typeof pg.countPendingForKey === 'function') return pg.countPendingForKey(topic, key)
   const result = await pg.query(
     `SELECT COUNT(*)::int AS cnt FROM pending_decisions
@@ -424,6 +436,7 @@ export async function countPendingForKey(pg, topic, key, projectId = 'default') 
  * @returns {Promise<Record<string, unknown> | null>}
  */
 export async function getPendingDecisionById(pg, conflictId) {
+  if (typeof pg.getPendingDecisionById === 'function') return pg.getPendingDecisionById(conflictId)
   const result = await pg.query(
     `SELECT * FROM pending_decisions WHERE conflict_id = $1 AND status = 'pending'`,
     [conflictId],
@@ -454,7 +467,7 @@ export async function insertPendingDecision(pg, record) {
       record.conflict_reason,
       typeof record.enrichment === 'string' ? record.enrichment : JSON.stringify(record.enrichment),
       record.more_pending_same_key ?? 0,
-      record.project_id ?? 'default',
+      record.project_id,
     ],
   )
 }
@@ -509,9 +522,9 @@ export async function updateConfidence(pg, id, newConfidence) {
  * @param {import('pg').Pool} pg
  * @param {string} topic
  * @param {string} key
- * @param {string} [projectId='default']
+ * @param {string} projectId - required
  */
-export async function updateLastAccessed(pg, topic, key, projectId = 'default') {
+export async function updateLastAccessed(pg, topic, key, projectId) {
   await pg.query(
     `UPDATE knowledge_versions
      SET last_accessed_at = NOW()
@@ -524,11 +537,11 @@ export async function updateLastAccessed(pg, topic, key, projectId = 'default') 
  * Fetch all ACTIVE knowledge versions eligible for confidence decay.
  * Eligible = older than 7 days, confidence above floor (0.10).
  * @param {import('pg').Pool} pg
- * @param {string} [projectId='default']
+ * @param {string} projectId - required
  * @param {number} [batchSize=200]
  * @returns {Promise<Array<{ id: number, topic: string, key: string, confidence: number, starting_confidence: number, last_accessed_at: string | null, created_at: string }>>}
  */
-export async function getDecayEligibleVersions(pg, projectId = 'default', batchSize = 200) {
+export async function getDecayEligibleVersions(pg, projectId, batchSize = 200) {
   const result = await pg.query(
     `SELECT id, topic, key, confidence, starting_confidence, last_accessed_at, created_at
      FROM knowledge_versions
@@ -591,7 +604,7 @@ export async function insertBump(pg, record) {
  * @param {{ author: string, domain: string, projectId: string, field: DomainStatField }} opts
  * @returns {Promise<void>}
  */
-export async function incrementDomainStat(pg, { author, domain, projectId = 'default', field }) {
+export async function incrementDomainStat(pg, { author, domain, projectId, field }) {
   if (!author || !domain) return
   try {
     await pg.query(
@@ -616,7 +629,7 @@ export async function incrementDomainStat(pg, { author, domain, projectId = 'def
  * @param {{ author: string, domain: string, projectId: string }} opts
  * @returns {Promise<{ approved_count: number, recalled_count: number, superseded_count: number } | null>}
  */
-export async function getDomainStats(pg, { author, domain, projectId = 'default' }) {
+export async function getDomainStats(pg, { author, domain, projectId }) {
   const { rows } = await pg.query(
     `SELECT approved_count, recalled_count, superseded_count
      FROM author_domain_stats

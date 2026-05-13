@@ -40,6 +40,7 @@ export function hashContent(content) {
  * @returns {Record<string, unknown>}
  */
 export function buildVersionRecord(params) {
+  if (!params.projectId) throw new Error('buildVersionRecord: projectId is required')
   const confidence = params.confidence ?? 0.7
   return {
     topic: params.topic,
@@ -47,6 +48,7 @@ export function buildVersionRecord(params) {
     version: params.version,
     status: params.status ?? KnowledgeStatus.ACTIVE,
     content_hash: hashContent(params.content),
+    summary: params.content,
     author: params.author,
     author_role: params.authorRole ?? 'unknown',
     confidence,
@@ -56,7 +58,7 @@ export function buildVersionRecord(params) {
     triggered_by: params.triggeredBy,
     conflict_id: params.conflictId ?? null,
     graphiti_episode_id: params.graphitiEpisodeId ?? null,
-    project_id: params.projectId ?? process.env.QUORUM_PROJECT_ID ?? 'default',
+    project_id: params.projectId,
     // Backward link — set at creation time
     supersedes_version: params.supersedesVersion ?? null,
     supersedes_reason: params.supersedesReason ?? null,

@@ -36,6 +36,8 @@ vi.mock('../../src/audit/pipeline.js', () => ({
   }),
 }))
 
+const testCtx = { projectId: 'test-project', gatewayUrl: 'http://localhost:3001' }
+
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
 function makeVersion(overrides = {}) {
@@ -70,7 +72,7 @@ describe('recall — default mode (ACTIVE)', () => {
     vi.mocked(getCurrentVersion).mockResolvedValue(null)
 
     const { handler } = await import('../../src/tools/recall.js')
-    const result = await handler({}, { topic: 'auth', key: 'unknown-key' })
+    const result = await handler({}, { topic: 'auth', key: 'unknown-key' }, undefined, testCtx)
     expect(result).toBeNull()
   })
 
@@ -79,7 +81,7 @@ describe('recall — default mode (ACTIVE)', () => {
     vi.mocked(getCurrentVersion).mockResolvedValue(makeVersion())
 
     const { handler } = await import('../../src/tools/recall.js')
-    const result = await handler({}, { topic: 'auth', key: 'token-strategy' })
+    const result = await handler({}, { topic: 'auth', key: 'token-strategy' }, undefined, testCtx)
 
     expect(typeof result).toBe('string')
     expect(result).toContain('<quorum_memory')
@@ -93,7 +95,7 @@ describe('recall — default mode (ACTIVE)', () => {
     vi.mocked(getCurrentVersion).mockResolvedValue(makeVersion())
 
     const { handler } = await import('../../src/tools/recall.js')
-    const result = await handler({}, { topic: 'auth', key: 'token-strategy' })
+    const result = await handler({}, { topic: 'auth', key: 'token-strategy' }, undefined, testCtx)
 
     expect(result).toContain('version="3"')
     expect(result).toContain('status="ACTIVE"')
@@ -106,7 +108,7 @@ describe('recall — default mode (ACTIVE)', () => {
     vi.mocked(getCurrentVersion).mockResolvedValue(makeVersion())
 
     const { handler } = await import('../../src/tools/recall.js')
-    const result = await handler({}, { topic: 'auth', key: 'token-strategy' })
+    const result = await handler({}, { topic: 'auth', key: 'token-strategy' }, undefined, testCtx)
 
     expect(result).toContain('Use JWT for Lambda, sessions for ECS')
   })
@@ -118,7 +120,7 @@ describe('recall — default mode (ACTIVE)', () => {
     )
 
     const { handler } = await import('../../src/tools/recall.js')
-    const result = await handler({}, { topic: 'auth', key: 'token-strategy' })
+    const result = await handler({}, { topic: 'auth', key: 'token-strategy' }, undefined, testCtx)
 
     expect(result).toContain('Updated')
     expect(result).toContain('day(s) ago')
@@ -131,7 +133,7 @@ describe('recall — default mode (ACTIVE)', () => {
     )
 
     const { handler } = await import('../../src/tools/recall.js')
-    const result = await handler({}, { topic: 'auth', key: 'token-strategy' })
+    const result = await handler({}, { topic: 'auth', key: 'token-strategy' }, undefined, testCtx)
 
     expect(result).not.toContain('day(s) ago')
   })
@@ -155,7 +157,7 @@ describe('recall — SUPERSEDED version', () => {
     )
 
     const { handler } = await import('../../src/tools/recall.js')
-    const result = await handler({}, { topic: 'auth', key: 'token-strategy', version: 1 })
+    const result = await handler({}, { topic: 'auth', key: 'token-strategy', version: 1 }, undefined, testCtx)
 
     expect(result).toContain('SUPERSEDED')
     expect(result).toContain('v2')
@@ -170,7 +172,7 @@ describe('recall — history mode', () => {
     vi.mocked(getVersionHistory).mockResolvedValue([])
 
     const { handler } = await import('../../src/tools/recall.js')
-    const result = await handler({}, { topic: 'auth', key: 'token-strategy', history: true })
+    const result = await handler({}, { topic: 'auth', key: 'token-strategy', history: true }, undefined, testCtx)
     expect(result).toBeNull()
   })
 
@@ -183,7 +185,7 @@ describe('recall — history mode', () => {
     ])
 
     const { handler } = await import('../../src/tools/recall.js')
-    const result = await handler({}, { topic: 'auth', key: 'token-strategy', history: true })
+    const result = await handler({}, { topic: 'auth', key: 'token-strategy', history: true }, undefined, testCtx)
 
     expect(typeof result).toBe('string')
     expect(result).toContain('auth:token-strategy')
@@ -203,7 +205,7 @@ describe('recall — point-in-time mode', () => {
     vi.mocked(getVersionAtDate).mockResolvedValue(null)
 
     const { handler } = await import('../../src/tools/recall.js')
-    const result = await handler({}, { topic: 'auth', key: 'token-strategy', at: '2023-01-01' })
+    const result = await handler({}, { topic: 'auth', key: 'token-strategy', at: '2023-01-01' }, undefined, testCtx)
     expect(result).toBeNull()
   })
 
@@ -214,7 +216,7 @@ describe('recall — point-in-time mode', () => {
     )
 
     const { handler } = await import('../../src/tools/recall.js')
-    const result = await handler({}, { topic: 'auth', key: 'token-strategy', at: '2024-01-15' })
+    const result = await handler({}, { topic: 'auth', key: 'token-strategy', at: '2024-01-15' }, undefined, testCtx)
 
     expect(result).toContain('2024-01-15')
     expect(result).toContain('Point-in-time')
@@ -229,7 +231,7 @@ describe('recall — specific version mode', () => {
     vi.mocked(getSpecificVersion).mockResolvedValue(null)
 
     const { handler } = await import('../../src/tools/recall.js')
-    const result = await handler({}, { topic: 'auth', key: 'token-strategy', version: 99 })
+    const result = await handler({}, { topic: 'auth', key: 'token-strategy', version: 99 }, undefined, testCtx)
     expect(result).toBeNull()
   })
 
@@ -238,7 +240,7 @@ describe('recall — specific version mode', () => {
     vi.mocked(getSpecificVersion).mockResolvedValue(makeVersion({ version: 2 }))
 
     const { handler } = await import('../../src/tools/recall.js')
-    const result = await handler({}, { topic: 'auth', key: 'token-strategy', version: 2 })
+    const result = await handler({}, { topic: 'auth', key: 'token-strategy', version: 2 }, undefined, testCtx)
 
     expect(result).toContain('version="2"')
   })

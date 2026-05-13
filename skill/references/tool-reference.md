@@ -1,6 +1,6 @@
 # Quorum Tool Reference
 
-Full parameter schemas, return shapes, and edge cases for all 9 MCP tools.
+Full parameter schemas, return shapes, and edge cases for all 10 MCP tools.
 
 ---
 
@@ -115,20 +115,23 @@ Resolve a DRAFT knowledge entry.
 - `topic`, `key` — target entry
 - `note` — mandatory reason (≥10 meaningful characters)
 
-**Constitutional constraint:** You cannot review knowledge you authored. If you wrote it
-via `reflect()`, surface it to the human and relay their decision.
+**Constitutional constraint:** Claude is **never** the approving reviewer — not even for
+knowledge authored by a different identity (e.g. a different `QUORUM_AUTHOR`). All DRAFT
+reviews must be surfaced to the human. Claude relays the human's decision via `review()`;
+it does not make the approval call itself.
 
 ---
 
-## `reflect(task_summary, decisions_made, patterns_used)`
+## `reflect(task_summary, options?)`
 
 Post-task knowledge extraction. Call once per completed task — not mid-task, not on
 abandoned tasks.
 
 **Parameters:**
 - `task_summary` — 1–3 sentences: what was done and why
-- `decisions_made` — array of decision strings with rationale
-- `patterns_used` — array of pattern strings
+- `options.decisions` — array of decision strings with rationale
+- `options.patterns` — array of pattern strings
+- `options.constraints` — array of constraints discovered during the task
 
 **Behaviour:**
 - Extracts individual learnable entries via LLM
@@ -156,6 +159,11 @@ version. Requires `reason` (≥10 meaningful characters).
 
 Use when knowledge is definitively obsolete, not just superseded by a newer entry.
 
+**Always require explicit human confirmation before calling `forget()`.** Say:
+*"I think `topic:key` is obsolete because [reason]. Should I deprecate it?"*
+Never deprecate autonomously — deprecation is visible to all engineers and
+irreversible without a superseding entry.
+
 ---
 
 ## `export(topic?, format)`
@@ -168,26 +176,66 @@ Export knowledge to human-readable format.
 
 ---
 
-## `authenticate(github_token, project_id)`
+## `authenticate(project_id?)`
 
-Authenticate with the Quorum Gateway via GitHub OAuth token. Required in gateway mode
-(`QUORUM_GATEWAY_URL` set). Token lives in MCP process memory — never written to disk.
+Authenticate with the Quorum Gateway via OAuth 2.1 + PKCE browser flow. Required in
+gateway mode (`QUORUM_GATEWAY_URL` set). Token lives in MCP process memory only —
+never written to disk.
 
 **Parameters:**
-- `github_token` — GitHub OAuth token (`gho_...`) obtained from the dashboard OAuth flow
-- `project_id` — project slug (`group_id`) to authenticate against
+- `project_id` — optional. Project slug (`group_id`) to authenticate against.
+  Defaults to `QUORUM_PROJECT_ID` env var or the value in the `.quorum` file.
+  Pass explicitly only when switching to a different project.
 
-**Trigger:** Call when any tool returns `401 Unauthorized` or `jwt_expired`. See the
-Auth section of SKILL.md for the full re-auth flow.
+**How it works:** The MCP server opens a browser tab to the gateway login page.
+The engineer signs in with GitHub. The GitHub token **never reaches Claude or the
+MCP server** — the gateway issues a scoped ES256 JWT (Gateway-MCP Token) which
+is stored in-memory. The browser shows "Quorum authenticated" and the flow returns.
+
+**Do not ask the engineer for a GitHub token.** The browser handles it entirely.
+
+**Trigger:** Auth runs automatically on first tool use. Call explicitly only to
+switch projects or after a `jwt_expired` / `401` response.
 
 **Direct mode** (no `QUORUM_GATEWAY_URL`): Not required. Identity resolves from
-git config user.email → `QUORUM_AUTHOR` env var → anonymous.
+`QUORUM_AUTHOR` env var → `git config user.email` → anonymous.
 
 **Returns:**
 ```json
-{ "status": "authenticated", "project": "platform-team", "role": "senior_engineer",
-  "sub": "github-username", "expires_in": 3600 }
+{ "status": "authenticated", "user": "github-username", "project": "platform-team",
+  "role": "senior_engineer", "team": "platform", "expires_in": 3600 }
+{ "status": "already_authenticated", "user": "...", "project": "...", "role": "...",
+  "note": "Already authenticated. Pass project_id to switch project." }
+{ "status": "project_mismatch", "message": "...", "hint": "Ask principal architect to add you." }
 ```
+
+---
+
+## `config_upload(options)`
+
+Upload a project config to the Quorum Gateway. Uses the JWT already stored by
+`authenticate()` — no token handling required. Call this during onboarding Phase 4.
+
+**Parameters:**
+- `options.config_path` — path to `<group_id>.quorum.json` file (required)
+
+**Gate exemption:** This tool bypasses the `no_project_context` gate — it runs before
+the `.quorum` file exists (that's Phase 5). Auth (Gate 2) still applies — call
+`authenticate()` first.
+
+**Use during onboarding Phase 4 only.** For config updates after onboarding, use the
+dashboard Config editor or `POST /sync/configs`.
+
+**Returns:**
+```json
+{ "status": "onboarded", "project_id": "platform-team", "message": "Project '...' onboarded successfully." }
+{ "status": "already_onboarded", "project_id": "platform-team", "hint": "Project already exists. Proceed to Phase 5." }
+```
+
+**Error conditions:**
+- `file_read_failed` — `config_path` not found or unreadable
+- `file_parse_failed` — file contains invalid JSON
+- Gateway `400` validation errors are rethrown as-is with the gateway's error message
 
 ---
 
@@ -201,9 +249,11 @@ You cannot call them directly — the MCP server proxies through them automatica
 | `GET /health` | — | Stack health: PostgreSQL, Graphiti, FalkorDB, S3 |
 | `GET /schema/config` | — | JSON Schema (Draft 7) for `<group_id>.quorum.json` config files |
 | `POST /config/validate` | — | Validate a config file without uploading |
-| `POST /auth/github` | — | GitHub OAuth redirect entry point |
-| `POST /auth/token` | — | Exchange GitHub token + project_id for JWT |
-| `GET /auth/projects` | JWT | List projects the authenticated user belongs to |
+| `GET /auth/github` | — | GitHub OAuth redirect entry point (browser flow) |
 | `POST /auth/switch` | JWT | Switch active project context (no re-OAuth) |
+| `GET /auth/projects` | JWT | List projects the authenticated user belongs to |
+| `POST /config/upload` | JWT/sync token | Upload + validate config; store in S3 + sync to DDB |
+| `POST /config/validate` | — | Validate a config file without uploading |
 | `POST /sync/configs` | JWT/sync token | S3→DDB full config sync (EventBridge-compatible) |
+| `GET /.well-known/oauth-authorization-server` | — | RFC8414 OAuth metadata discovery |
 | `GET /.well-known/jwks.json` | — | JWKS endpoint for JWT verification |

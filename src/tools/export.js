@@ -24,9 +24,14 @@ export const schema = z.object({
 /**
  * @param {import('pg').Pool} pg
  * @param {z.infer<typeof schema>} input
+ * @param {import('../identity/resolver.js').ResolvedIdentity} [identity]
+ * @param {{ projectId: string, gatewayUrl: string } | null} [ctx]
  * @returns {Promise<Record<string, unknown>>}
  */
-export async function handler(pg, input) {
+export async function handler(pg, input, identity, ctx) {
+  const projectId = ctx?.projectId
+  if (!projectId) throw new Error('export: ctx.projectId is required — ensure a .quorum file exists in this workspace')
+
   const pipelineResult = await withAuditPipeline(
     pg,
     {
@@ -38,8 +43,8 @@ export async function handler(pg, input) {
     async () => {
       // Query active and superseded versions from PostgreSQL
       const [activeRows, supersededRows] = await Promise.all([
-        getVersionsByStatus(pg, KnowledgeStatus.ACTIVE, { topic: input.topic }),
-        getVersionsByStatus(pg, KnowledgeStatus.SUPERSEDED, { topic: input.topic }),
+        getVersionsByStatus(pg, KnowledgeStatus.ACTIVE, { topic: input.topic, projectId }),
+        getVersionsByStatus(pg, KnowledgeStatus.SUPERSEDED, { topic: input.topic, projectId }),
       ])
 
       // Get content from Graphiti for active nodes
@@ -48,7 +53,7 @@ export async function handler(pg, input) {
           let content = '[Content stored in graph — search for this key to retrieve]'
           if (v.graphiti_episode_id) {
             try {
-              const searchResult = await searchNodes(`${v.topic}:${v.key}`, { limit: 1 })
+              const searchResult = await searchNodes(`${v.topic}:${v.key}`, { limit: 1, groupId: projectId })
               content = searchResult?.nodes?.[0]?.summary ?? content
             } catch {
               // use placeholder
@@ -59,7 +64,7 @@ export async function handler(pg, input) {
       )
 
       // Stats
-      const stats = await getVersionStatusCounts(pg, { topic: input.topic })
+      const stats = await getVersionStatusCounts(pg, { topic: input.topic, projectId })
 
       const formatted = input.format === 'markdown'
         ? buildMarkdown(input.topic, activeWithContent, supersededRows, stats)

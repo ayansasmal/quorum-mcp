@@ -83,9 +83,11 @@ async function isDuplicateReflect(gw, topic, key, contentHash) {
 /**
  * @param {import('pg').Pool} pg
  * @param {z.infer<typeof schema>} input
+ * @param {import('../identity/resolver.js').ResolvedIdentity} [identity]
+ * @param {{ projectId: string, gatewayUrl: string } | null} [ctx]
  * @returns {Promise<Record<string, unknown>>}
  */
-export async function handler(pg, input) {
+export async function handler(pg, input, identity, ctx) {
   const pipelineResult = await withAuditPipeline(
     pg,
     {
@@ -126,7 +128,7 @@ export async function handler(pg, input) {
             entity_type: item.entity_type,
             triggered_by: TriggeredBy.REFLECT,
             session_id: input.session_id,
-          })
+          }, identity, ctx)
 
           if (result?.status === 'conflict_detected') {
             conflicts.push({ ...item, conflict: result })

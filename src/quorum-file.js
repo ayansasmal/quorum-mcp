@@ -48,13 +48,30 @@ export function findQuorumFile(startDir = process.cwd()) {
 
 /**
  * Load and parse the `.quorum` file from `filePath`.
+ * Supports both JSON format (written by `quorum init`) and legacy key=value
+ * format (e.g. `gateway_url=http://localhost:3001`).
  * Returns null if the file cannot be read or parsed.
  * @param {string} filePath
  * @returns {QuorumFileConfig | null}
  */
 export function loadQuorumFile(filePath) {
   try {
-    const raw = JSON.parse(readFileSync(filePath, 'utf8'))
+    const text = readFileSync(filePath, 'utf8').trim()
+    let raw
+
+    if (text.startsWith('{')) {
+      raw = JSON.parse(text)
+    } else {
+      // key=value format: one "key=value" pair per line, ignore blank lines + comments
+      raw = {}
+      for (const line of text.split('\n')) {
+        const trimmed = line.trim()
+        if (!trimmed || trimmed.startsWith('#')) continue
+        const eq = trimmed.indexOf('=')
+        if (eq === -1) continue
+        raw[trimmed.slice(0, eq).trim()] = trimmed.slice(eq + 1).trim()
+      }
+    }
 
     if (!raw.gateway_url || !raw.project_id) {
       console.error(`[Quorum] .quorum file at ${filePath} is missing gateway_url or project_id — ignored`)
@@ -62,9 +79,9 @@ export function loadQuorumFile(filePath) {
     }
 
     return {
-      gateway_url: String(raw.gateway_url).replace(/\/$/, ''), // strip trailing slash
-      project_id: String(raw.project_id),
-      _source: filePath,
+      gateway_url: String(raw.gateway_url).replace(/\/$/, '').trim(),
+      project_id:  String(raw.project_id).trim(),
+      _source:     filePath,
     }
   } catch (err) {
     console.error(`[Quorum] Failed to read .quorum file at ${filePath}: ${err.message}`)
@@ -85,7 +102,14 @@ export function loadQuorumFile(filePath) {
  * @returns {QuorumFileConfig | null} The config that was applied, or null if no file found
  */
 export function applyQuorumFileDefaults(startDir) {
-  const filePath = findQuorumFile(startDir)
+  // Try caller-supplied dir first, then shell PWD (correct when `claude` was launched
+  // from the project root), then Node's resolved cwd as final fallback.
+  const candidates = [startDir, process.env.PWD, process.cwd()].filter(Boolean)
+  let filePath = null
+  for (const dir of candidates) {
+    filePath = findQuorumFile(dir)
+    if (filePath) break
+  }
   if (!filePath) return null
 
   const cfg = loadQuorumFile(filePath)
@@ -101,6 +125,18 @@ export function applyQuorumFileDefaults(startDir) {
   }
 
   return cfg
+}
+
+/**
+ * Pure helper — find and parse the `.quorum` file without mutating process.env.
+ * Returns the parsed config or null if no file is found or parsing fails.
+ * @param {string} startDir - Directory to start searching from
+ * @returns {QuorumFileConfig | null}
+ */
+export function findAndLoadQuorumFile(startDir) {
+  const filePath = findQuorumFile(startDir)
+  if (!filePath) return null
+  return loadQuorumFile(filePath)
 }
 
 /**
