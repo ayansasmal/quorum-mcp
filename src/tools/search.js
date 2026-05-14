@@ -1,7 +1,10 @@
 /**
  * search() — Semantic search across the knowledge graph.
  *
- * Uses Graphiti's hybrid search (semantic + BM25 + graph traversal).
+ * Primary: Graphiti hybrid search (semantic + BM25 + graph traversal).
+ * Fallback: PostgreSQL ILIKE on key, topic, and summary columns — used when
+ *   Graphiti/FalkorDB is empty (e.g. after a volume wipe) so engineers can
+ *   still find knowledge by name even before re-ingestion.
  * Filters out DRAFT, DEPRECATED, and REJECTED nodes from results.
  * Audited: what Claude searched for is part of the audit trail.
  */
@@ -111,6 +114,53 @@ export async function handler(pg, input, identity, ctx) {
           .slice(0, 3)
           .map((f) => f.fact),
       }))
+
+      // If Graphiti returned nothing (empty FalkorDB / offline), fall back to
+      // PostgreSQL ILIKE on key, topic, and summary so knowledge remains
+      // discoverable by name even before re-ingestion.
+      if (results.length === 0) {
+        const pattern = `%${input.query}%`
+        const domainClause = input.domain ? 'AND topic = $3' : ''
+        const queryParams  = input.domain
+          ? [projectId, pattern, input.domain]
+          : [projectId, pattern]
+
+        const { rows: pgRows } = await pg.query(
+          `SELECT topic, key, summary, status, confidence, author, updated_at
+           FROM knowledge_versions
+           WHERE project_id = $1
+             AND (key ILIKE $2 OR topic ILIKE $2 OR summary ILIKE $2)
+             AND status NOT IN ('DRAFT','DEPRECATED','REJECTED')
+             ${domainClause}
+           ORDER BY confidence DESC, updated_at DESC
+           LIMIT $${queryParams.length + 1}`,
+          [...queryParams, input.limit],
+        )
+
+        if (pgRows.length > 0) {
+          const pgResults = pgRows.map((r) => ({
+            topic_key:     `${r.topic}:${r.key}`,
+            summary:       r.summary || null,
+            author:        r.author,
+            confidence:    r.confidence,
+            status:        r.status,
+            score:         null,
+            source:        'postgres-fallback',
+            episode_id:    null,
+            related_facts: [],
+          }))
+
+          return {
+            result: {
+              results:  pgResults,
+              total:    pgRows.length,
+              query:    input.query,
+              fallback: 'postgres',
+            },
+            versionImpact: buildAuditVersionImpact([], []),
+          }
+        }
+      }
 
       return {
         result: { results, total: results.length, query: input.query },

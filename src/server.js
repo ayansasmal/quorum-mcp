@@ -99,8 +99,12 @@ async function resolveCtx() {
       const dir = decodeURIComponent(uri.slice('file://'.length))
       const cfg = findAndLoadQuorumFile(dir)
       if (cfg) {
-        log.debug('resolveCtx: resolved from MCP roots', { dir, projectId: cfg.project_id, gatewayUrl: cfg.gateway_url })
-        return { projectId: cfg.project_id.trim(), gatewayUrl: cfg.gateway_url }
+        // Normalize hyphens → underscores: FalkorDB uses group_id as a graph name and
+        // RediSearch treats hyphens as NOT operators in tag filters, causing silent empty
+        // results. The canonical form is underscore-separated (e.g. amethyst_munchkin).
+        const projectId = cfg.project_id.trim().replace(/-/g, '_')
+        log.debug('resolveCtx: resolved from MCP roots', { dir, projectId, gatewayUrl: cfg.gateway_url })
+        return { projectId, gatewayUrl: cfg.gateway_url }
       }
     }
   } catch (err) {
@@ -111,15 +115,17 @@ async function resolveCtx() {
   for (const dir of [process.env.PWD, process.cwd()].filter(Boolean)) {
     const cfg = findAndLoadQuorumFile(dir)
     if (cfg) {
-      log.debug('resolveCtx: resolved from cwd', { dir, projectId: cfg.project_id, gatewayUrl: cfg.gateway_url })
-      return { projectId: cfg.project_id.trim(), gatewayUrl: cfg.gateway_url }
+      const projectId = cfg.project_id.trim().replace(/-/g, '_')
+      log.debug('resolveCtx: resolved from cwd', { dir, projectId, gatewayUrl: cfg.gateway_url })
+      return { projectId, gatewayUrl: cfg.gateway_url }
     }
   }
 
   // 3. Fall back to explicit env vars (CI/enterprise contexts)
-  const projectId  = process.env.QUORUM_PROJECT_ID?.trim() ?? process.env.QUORUM_GROUP_ID?.trim() ?? null
-  const gatewayUrl = process.env.QUORUM_GATEWAY_URL ?? null
-  if (projectId) {
+  const rawProjectId = process.env.QUORUM_PROJECT_ID?.trim() ?? process.env.QUORUM_GROUP_ID?.trim() ?? null
+  const gatewayUrl   = process.env.QUORUM_GATEWAY_URL ?? null
+  if (rawProjectId) {
+    const projectId = rawProjectId.replace(/-/g, '_')
     log.debug('resolveCtx: resolved from env vars', { projectId, gatewayUrl })
     return { projectId, gatewayUrl: gatewayUrl ?? 'http://localhost:3001' }
   }

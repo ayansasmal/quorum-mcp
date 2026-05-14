@@ -24,7 +24,10 @@ dashboard Config editor or `POST /sync/configs`.
 Ask the human in **one prompt**:
 
 > "To onboard this project I need:
-> 1. **Project ID** — short slug e.g. `platform-team` (default: current directory name)
+> 1. **Project ID** — short slug, **underscores only** e.g. `platform_team` (default: current directory name, hyphens replaced with `_`)
+>    ⚠️ Hyphens are **not allowed**: FalkorDB uses `group_id` as a graph name and RediSearch
+>    treats `-` as a NOT operator in tag filters — a hyphenated ID causes all graph searches
+>    to silently return empty results. Use `my_project`, not `my-project`.
 > 2. **Team members** — for each: name, GitHub username, git email, role
 >    (`principal_architect` | `senior_engineer` | `engineer` | `junior`)
 > 3. **Key domains** — any domain needing stricter governance e.g. `auth`, `payments`
@@ -70,8 +73,10 @@ Write `<project_id>.quorum.json` (filename must match the `group_id` value):
 ```
 
 `group_id` is the only required field — it is the canonical identifier used as the
-S3 key, DDB primary key, JWT claim, and Graphiti namespace. `project` is an optional
-display name; omit it unless you want a different label in the dashboard.
+S3 key, DDB primary key, JWT claim, and Graphiti namespace. **Must use underscores,
+not hyphens** (`my_project` not `my-project`): FalkorDB uses this value as a graph
+name and RediSearch treats hyphens as NOT operators, causing silent empty search results.
+`project` is an optional display name; omit it unless you want a different label in the dashboard.
 
 Add domain overrides if provided:
 ```json

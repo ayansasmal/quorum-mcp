@@ -25,8 +25,11 @@ const GRAPHITI_URL = process.env.GRAPHITI_URL || 'http://graphiti:8000'
 
 /**
  * Graphiti validates group_ids against ^[a-zA-Z0-9_-]+$ before FalkorDB/RediSearch.
- * Escaping hyphens as \- fails that validation. Pass group_ids unmodified.
+ * Escaping hyphens as \- fails that validation. Group ID sanitization (hyphen →
+ * underscore) is handled by the gateway proxy in routes/graphiti.js — not here.
  * Callers rely on PostgreSQL (via gateway) for project isolation instead.
+ *
+ * @deprecated group_ids are omitted from search calls; kept for reference only
  */
 function escapeGroupIds(ids) {
   return ids
@@ -267,13 +270,21 @@ async function callGraphiti(tool, params, maxRetries = 3) {
  */
 export async function addEpisode(content, metadata, groupId) {
   if (!groupId) throw new Error('addEpisode: groupId is required')
+  // NOTE: do NOT pass uuid to add_memory. In Graphiti 0.29+, providing uuid
+  // means "retrieve existing episode with this UUID" — if the node doesn't
+  // exist in FalkorDB (e.g. after a volume wipe), add_episode raises
+  // NodeNotFoundError and the episode is never created.
+  // A local tracking UUID is returned as episode_id and stored in
+  // knowledge_versions.graphiti_episode_id, but it is NOT a real Graphiti UUID.
+  //
+  // sanitizeGroupId: hyphens cause RediSearch syntax errors in Graphiti's
+  // internal queries. Replace with underscores for the FalkorDB graph name.
   const uuid = randomUUID()
   await callGraphiti('add_memory', {
     name:               metadata.key,
     episode_body:       content,
     group_id:           groupId,
     source_description: metadata.source,
-    uuid,
   })
   return { episode_id: uuid }
 }
@@ -290,13 +301,13 @@ export async function addEpisode(content, metadata, groupId) {
  */
 export async function addSupersedingEpisode(newContent, oldEpisodeId, metadata, groupId) {
   if (!groupId) throw new Error('addSupersedingEpisode: groupId is required')
+  // Same reason as addEpisode — do not pass uuid; sanitize group_id.
   const uuid = randomUUID()
   await callGraphiti('add_memory', {
     name:               metadata.key,
     episode_body:       `${newContent}\n\n[supersedes:${oldEpisodeId}] ${metadata.reason ?? 'updated'}`,
     group_id:           groupId,
     source_description: metadata.source,
-    uuid,
   })
 
   return { episode_id: uuid }
