@@ -13,8 +13,10 @@
  * The MCP always communicates with a Quorum gateway over HTTP — never directly
  * to PostgreSQL or Graphiti. Default gateway: http://localhost:3001 (local dev).
  *
- * Identity is resolved once and injected into every tool handler call.
- * Tool schemas do not accept author/reviewer as input — server-side only.
+ * Identity is resolved fresh on every tool call — not captured at startup —
+ * so role changes in DDB/Redis (propagated via the gateway profile cache) are
+ * reflected immediately. Tool schemas do not accept author/reviewer as input —
+ * server-side only.
  */
 
 import { findAndLoadQuorumFile } from './quorum-file.js';
@@ -136,16 +138,18 @@ async function resolveCtx() {
 
 /**
  * Register all tools with the MCP server.
- * Identity is captured in the closure and injected into every handler call —
- * it is never sourced from tool input.
  *
- * Pool resolution is deferred to call time (not startup) so that the
+ * Identity is resolved fresh on every tool call — not captured at startup — so
+ * role changes in DDB/Redis are reflected immediately. The per-call cost is one
+ * async function call (gateway JWT decode is purely in-memory; the network is
+ * only touched on fallback to resolveIdentity()). Identity is never sourced
+ * from tool input.
+ *
+ * Pool resolution is also deferred to call time (not startup) so that the
  * authenticate() tool can inject a token at runtime and subsequent tool calls
  * transparently pick up the new gateway client.
- *
- * @param {import('./identity/resolver.js').ResolvedIdentity} identity
  */
-function registerTools(identity) {
+export function registerTools() {
   for (const { name, def } of tools) {
     server.tool(name, def.schema.shape ?? def.schema, async input => {
       log.startCall(name)
@@ -199,6 +203,19 @@ function registerTools(identity) {
 
         // Inject project scope — v0.3: project travels as X-Quorum-Project header, not JWT claim
         if (activePool?.setProjectId) activePool.setProjectId(ctx?.projectId ?? null)
+
+        // Resolve identity fresh on every call — captures live role from the
+        // gateway profile cache so role changes in DDB/Redis take effect
+        // immediately (Gap 5). Falls back to local resolution when the gateway
+        // path is unavailable so the server keeps working pre-auth.
+        let identity
+        try {
+          identity = activePool
+            ? await activePool.getIdentity()
+            : await resolveIdentity()
+        } catch {
+          identity = await resolveIdentity()
+        }
 
         const result = await def.handler(activePool, input, identity, ctx);
         return {
@@ -290,9 +307,10 @@ async function startup() {
     );
   }
 
-  // 4. Resolve caller identity — once per session, injected into all tool calls
-  // Attempts gateway identity (JWT-verified) first; falls back to local resolution
-  // if not yet authenticated so the server can start without a valid session.
+  // 4. Resolve caller identity for diagnostics ONLY — the actual identity used
+  // by tool handlers is resolved fresh per call (see registerTools). This
+  // one-time resolve is kept solely so the startup log surfaces who the server
+  // believes it's running as.
   const activeGatewayClient = getGatewayClient();
   let identity;
   try {
@@ -303,15 +321,15 @@ async function startup() {
     identity = await resolveIdentity();
   }
   console.error(
-    `[Quorum] ✓ Identity resolved: ${identity.name} (method: ${identity.method}, role: ${identity.role ?? 'none'})`,
+    `[Quorum] ✓ Identity resolved: ${identity.name} (method: ${identity.method}, role: ${identity.role ?? 'none'}) — re-resolved on every tool call`,
   );
 
   // 5. Validate MCP manifest has no delete-capable tools
   validateManifestHasNoDeleteTools(tools.map(t => ({ name: t.name })));
   console.error('[Quorum] ✓ Tool manifest validated (no delete tools)');
 
-  // 6. Register tools with identity in closure
-  registerTools(identity);
+  // 6. Register tools — identity is resolved fresh inside each handler invocation
+  registerTools();
 
   // 7. Start health HTTP endpoint
   startHealthServer();
@@ -377,7 +395,21 @@ process.on('SIGINT', shutdown);
 
 // ── Run ────────────────────────────────────────────────────────────────────────
 
-startup().catch(err => {
-  console.error('[Quorum] Startup failed:', err);
-  process.exit(1);
-});
+// Only auto-run startup when executed as the main entrypoint — not when
+// imported by tests. import.meta.url uses the file:// scheme; process.argv[1]
+// is the resolved path of the entry script.
+const isMain = (() => {
+  try {
+    return import.meta.url === `file://${process.argv[1]}`
+      || import.meta.url.endsWith(process.argv[1] ?? '')
+  } catch {
+    return false
+  }
+})()
+
+if (isMain) {
+  startup().catch(err => {
+    console.error('[Quorum] Startup failed:', err);
+    process.exit(1);
+  });
+}
