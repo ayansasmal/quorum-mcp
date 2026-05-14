@@ -332,29 +332,43 @@ export async function getEvolutionChain(episodeId, groupId) {
 
 /**
  * Search for knowledge nodes semantically.
+ *
+ * group_ids is now passed when groupId is provided — project IDs use
+ * underscores (normalised at resolveCtx and the gateway Graphiti proxy)
+ * so RediSearch tag filters are safe. This restores project isolation
+ * for semantic search; without it, every project's knowledge would
+ * appear in every other project's results.
+ *
  * @param {string} query
- * @param {{ limit?: number, groupIds?: string[], groupId?: string }} options - groupId or groupIds required
+ * @param {{ limit?: number, groupIds?: string[], groupId?: string }} [options]
  * @returns {Promise<{ nodes: Array<unknown> }>}
  */
 export async function searchNodes(query, options = {}) {
-  // group_ids omitted — FalkorDB/RediSearch treats hyphens in group IDs as NOT operators,
-  // breaking queries for hyphenated project IDs. Project isolation is enforced by the
-  // PostgreSQL layer via the gateway.
+  const groupId = options.groupId ?? options.groupIds?.[0]
   return callGraphiti('search_nodes', {
     query,
     max_nodes: options.limit ?? 10,
+    ...(groupId ? { group_ids: [groupId] } : {}),
   })
 }
 
 /**
  * Search for relationships/edges across the knowledge graph.
+ *
+ * group_ids is now passed when groupId is provided — project IDs use
+ * underscores (normalised at resolveCtx and the gateway Graphiti proxy)
+ * so RediSearch tag filters are safe.
+ *
  * @param {string} query
  * @param {{ groupIds?: string[], groupId?: string }} [options]
  * @returns {Promise<{ facts: Array<unknown> }>}
  */
 export async function searchFacts(query, options = {}) {
-  // group_ids omitted — see searchNodes comment.
-  return callGraphiti('search_memory_facts', { query })
+  const groupId = options.groupId ?? options.groupIds?.[0]
+  return callGraphiti('search_memory_facts', {
+    query,
+    ...(groupId ? { group_ids: [groupId] } : {}),
+  })
 }
 
 /**
