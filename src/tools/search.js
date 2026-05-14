@@ -116,50 +116,37 @@ export async function handler(pg, input, identity, ctx) {
       }))
 
       // If Graphiti returned nothing (empty FalkorDB / offline), fall back to
-      // PostgreSQL ILIKE on key, topic, and summary so knowledge remains
-      // discoverable by name even before re-ingestion.
+      // a keyword search over PostgreSQL via the typed gateway endpoint.
+      // pg is a GatewayClient here — raw pg.query() always throws, so we route
+      // through the dedicated /pg/search route via searchByText().
       if (results.length === 0) {
-        const pattern = `%${input.query}%`
-        const domainClause = input.domain ? 'AND topic = $3' : ''
-        const queryParams  = input.domain
-          ? [projectId, pattern, input.domain]
-          : [projectId, pattern]
-
-        const { rows: pgRows } = await pg.query(
-          `SELECT topic, key, summary, status, confidence, author, updated_at
-           FROM knowledge_versions
-           WHERE project_id = $1
-             AND (key ILIKE $2 OR topic ILIKE $2 OR summary ILIKE $2)
-             AND status NOT IN ('DRAFT','DEPRECATED','REJECTED')
-             ${domainClause}
-           ORDER BY confidence DESC, updated_at DESC
-           LIMIT $${queryParams.length + 1}`,
-          [...queryParams, input.limit],
-        )
-
-        if (pgRows.length > 0) {
-          const pgResults = pgRows.map((r) => ({
-            topic_key:     `${r.topic}:${r.key}`,
-            summary:       r.summary || null,
-            author:        r.author,
-            confidence:    r.confidence,
-            status:        r.status,
-            score:         null,
-            source:        'postgres-fallback',
-            episode_id:    null,
-            related_facts: [],
-          }))
-
-          return {
-            result: {
-              results:  pgResults,
-              total:    pgRows.length,
-              query:    input.query,
-              fallback: 'postgres',
-            },
-            versionImpact: buildAuditVersionImpact([], []),
+        try {
+          const fallback = await pg.searchByText(input.query, {
+            domain: input.domain,
+            limit:  input.limit,
+          })
+          if (fallback.results?.length > 0) {
+            return {
+              result: {
+                results:  fallback.results.map((r) => ({
+                  topic_key:     `${r.topic}:${r.key}`,
+                  summary:       r.summary || null,
+                  author:        r.author,
+                  confidence:    r.confidence,
+                  status:        r.status,
+                  score:         null,
+                  source:        'postgres-fallback',
+                  episode_id:    null,
+                  related_facts: [],
+                })),
+                total:    fallback.results.length,
+                query:    input.query,
+                fallback: 'postgres',
+              },
+              versionImpact: buildAuditVersionImpact([], []),
+            }
           }
-        }
+        } catch { /* fallback unavailable — return empty */ }
       }
 
       return {

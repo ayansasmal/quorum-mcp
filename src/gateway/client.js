@@ -317,6 +317,24 @@ export class GatewayClient {
     return this._get('/pg/versions/drafts', Object.keys(query).length ? query : undefined)
   }
 
+  // ── Keyword search (ILIKE fallback) ───────────────────────────────────────
+
+  /**
+   * Keyword search (ILIKE) fallback — used when Graphiti returns 0 results.
+   * Backed by GET /pg/search on the gateway; results are scoped by the project
+   * claim attached to the current JWT.
+   *
+   * @param {string} query - Free-text search term matched against topic/key/summary.
+   * @param {{ domain?: string, limit?: number }} [options]
+   * @returns {Promise<{ results: Array<object>, total: number, source: string }>}
+   */
+  async searchByText(query, options = {}) {
+    const params = new URLSearchParams({ q: query })
+    if (options.domain) params.set('domain', options.domain)
+    if (options.limit)  params.set('limit',  String(options.limit))
+    return this._get(`/pg/search?${params}`)
+  }
+
   // ── Config ─────────────────────────────────────────────────────────────────
 
   async getConfig(projectId) {
