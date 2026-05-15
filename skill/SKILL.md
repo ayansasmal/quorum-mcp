@@ -313,11 +313,12 @@ A 401 mid-session interrupts the engineer's flow — auth first removes that ris
 
 ### Project ID constraint
 
-`group_id` / `project_id` **must use underscores, not hyphens**. FalkorDB uses `group_id`
-as a graph name; RediSearch treats `-` as a NOT operator in tag filter queries, so a
-hyphenated ID (e.g. `my-project`) causes all `searchNodes` / `searchFacts` calls to
-silently return empty results. The canonical value in `.quorum` and the config file
-should already use underscores.
+`group_id` **must use hyphens, not underscores** — the gateway schema enforces
+`/^[a-z0-9-]+$/` and rejects underscores. Use `amethyst-munchkin`, not `amethyst_munchkin`.
+
+The gateway Graphiti proxy silently normalises hyphens → underscores before every
+Graphiti/FalkorDB call, so RediSearch tag filters work correctly. This normalisation
+is invisible to callers — never try to work around it by using underscores in `group_id`.
 
 When `q_project_id` is present in `.quorum`, `resolveCtx()` sends it directly in the
 `X-Quorum-Project` header — no underscore normalisation is needed because `q_project_id`
@@ -337,8 +338,8 @@ Follow the full 10-phase protocol: [`references/onboarding.md`](references/onboa
 
 **Phase overview:**
 1. Check for existing setup (`.quorum` file) — hard-stop if already onboarded
-2. Gather team info — project ID (**underscores only**, e.g. `platform_team`), members, domains, gateway URL
-3. Create + validate `<group_id>.quorum.json` config — `group_id` must use `_` not `-`; `owner` (GitHub username) is **required**
+2. Gather team info — project ID (**hyphens only, no underscores**, e.g. `platform-team`), members, domains, gateway URL
+3. Create + validate `<group_id>.quorum.json` config — `group_id` must use `-` not `_`; `owner` (GitHub username) is **required**
 4. Upload config via `config_upload({ config_path: "<id>.quorum.json" })` — save the `q_project_id` from the response
 5. Create `.quorum` discovery file (`quorum init`) and add the `q_project_id` from Phase 4
 6. Share install instructions with team (`npm install -g @as-quorum/mcp`)

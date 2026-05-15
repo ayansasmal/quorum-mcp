@@ -24,10 +24,9 @@ dashboard Config editor or `POST /sync/configs`.
 Ask the human in **one prompt**:
 
 > "To onboard this project I need:
-> 1. **Project ID** — short slug, **underscores only** e.g. `platform_team` (default: current directory name, hyphens replaced with `_`)
->    ⚠️ Hyphens are **not allowed**: FalkorDB uses `group_id` as a graph name and RediSearch
->    treats `-` as a NOT operator in tag filters — a hyphenated ID causes all graph searches
->    to silently return empty results. Use `my_project`, not `my-project`.
+> 1. **Project ID** — short slug, **hyphens allowed, underscores not** e.g. `platform-team` (default: current directory name)
+>    The gateway enforces `/^[a-z0-9-]+$/` — use `my-project`, not `my_project`.
+>    The gateway proxy normalises hyphens → underscores for Graphiti internally; callers never need to.
 > 2. **Team members** — for each: name, GitHub username, git email, role
 >    (`principal_architect` | `senior_engineer` | `engineer` | `junior`)
 > 3. **Key domains** — any domain needing stricter governance e.g. `auth`, `payments`
@@ -75,8 +74,9 @@ Write `<project_id>.quorum.json` (filename must match the `group_id` value):
 
 `group_id` and `owner` are both required fields.
 - `group_id` — canonical identifier used as the S3 key, DDB primary key, and Graphiti namespace.
-  **Must use underscores, not hyphens** (`my_project` not `my-project`): FalkorDB uses this value
-  as a graph name and RediSearch treats hyphens as NOT operators, causing silent empty search results.
+  **Must use hyphens, not underscores** (`my-project` not `my_project`): the gateway schema
+  enforces `/^[a-z0-9-]+$/`. The gateway Graphiti proxy normalises hyphens → underscores
+  internally before passing to FalkorDB — callers never need to know about this.
 - `owner` — GitHub username of the project owner (required for governance, transfer-of-ownership, role updates).
 - `project` — optional display name; omit it unless you want a different label in the dashboard.
 
