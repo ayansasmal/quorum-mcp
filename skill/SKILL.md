@@ -316,9 +316,16 @@ A 401 mid-session interrupts the engineer's flow — auth first removes that ris
 `group_id` / `project_id` **must use underscores, not hyphens**. FalkorDB uses `group_id`
 as a graph name; RediSearch treats `-` as a NOT operator in tag filter queries, so a
 hyphenated ID (e.g. `my-project`) causes all `searchNodes` / `searchFacts` calls to
-silently return empty results. The MCP normalises hyphens to underscores automatically
-at `resolveCtx()`, and the gateway proxy sanitises at the Graphiti forwarding layer — but
-the canonical value in `.quorum` and the config file should already use underscores.
+silently return empty results. The canonical value in `.quorum` and the config file
+should already use underscores.
+
+When `q_project_id` is present in `.quorum`, `resolveCtx()` sends it directly in the
+`X-Quorum-Project` header — no underscore normalisation is needed because `q_project_id`
+is an opaque integer ID (`q_p{n}`) with no hyphens. The `group_id → q_project_id` DB
+lookup is skipped entirely on the gateway side, reducing per-request latency.
+
+Add `q_project_id` to `.quorum` during Phase 5 of onboarding — the `config_upload` tool
+returns it in the `next_step` field of the Phase 4 response.
 
 ---
 
@@ -331,9 +338,9 @@ Follow the full 10-phase protocol: [`references/onboarding.md`](references/onboa
 **Phase overview:**
 1. Check for existing setup (`.quorum` file) — hard-stop if already onboarded
 2. Gather team info — project ID (**underscores only**, e.g. `platform_team`), members, domains, gateway URL
-3. Create + validate `<group_id>.quorum.json` config (`group_id` must use `_` not `-`)
-4. Upload config via `config_upload({ config_path: "<id>.quorum.json" })` MCP tool
-5. Create `.quorum` discovery file (`quorum init`)
+3. Create + validate `<group_id>.quorum.json` config — `group_id` must use `_` not `-`; `owner` (GitHub username) is **required**
+4. Upload config via `config_upload({ config_path: "<id>.quorum.json" })` — save the `q_project_id` from the response
+5. Create `.quorum` discovery file (`quorum init`) and add the `q_project_id` from Phase 4
 6. Share install instructions with team (`npm install -g @as-quorum/mcp`)
 7. Verify own skill + hooks are present
 8. **Ingest existing knowledge** — CLAUDE.md, MEMORY.md, session transcripts → DRAFT entries

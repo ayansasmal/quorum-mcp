@@ -49,6 +49,7 @@ Write `<project_id>.quorum.json` (filename must match the `group_id` value):
 {
   "$schema": "http://localhost:3001/schema/config",
   "group_id": "<project_id>",
+  "owner": "<github_username>",
   "members": [
     {
       "name": "<name>",
@@ -72,11 +73,12 @@ Write `<project_id>.quorum.json` (filename must match the `group_id` value):
 }
 ```
 
-`group_id` is the only required field — it is the canonical identifier used as the
-S3 key, DDB primary key, JWT claim, and Graphiti namespace. **Must use underscores,
-not hyphens** (`my_project` not `my-project`): FalkorDB uses this value as a graph
-name and RediSearch treats hyphens as NOT operators, causing silent empty search results.
-`project` is an optional display name; omit it unless you want a different label in the dashboard.
+`group_id` and `owner` are both required fields.
+- `group_id` — canonical identifier used as the S3 key, DDB primary key, and Graphiti namespace.
+  **Must use underscores, not hyphens** (`my_project` not `my-project`): FalkorDB uses this value
+  as a graph name and RediSearch treats hyphens as NOT operators, causing silent empty search results.
+- `owner` — GitHub username of the project owner (required for governance, transfer-of-ownership, role updates).
+- `project` — optional display name; omit it unless you want a different label in the dashboard.
 
 Add domain overrides if provided:
 ```json
@@ -112,12 +114,22 @@ one call.
 
 Expected response:
 ```json
-{ "status": "onboarded", "project_id": "<project_id>", "message": "Project '...' onboarded successfully." }
+{
+  "status": "onboarded",
+  "project_id": "<project_id>",
+  "q_project_id": "q_p1",
+  "message": "Project '...' onboarded successfully.",
+  "next_step": "Add both project_id and q_project_id to your .quorum file:\n{\"gateway_url\":\"...\",\"project_id\":\"<project_id>\",\"q_project_id\":\"q_p1\"}"
+}
 ```
 
-A `{ "status": "already_onboarded" }` response means the project already exists in
-S3 — proceed to Phase 5. You are connecting to an existing project, not creating a
-new one.
+**Save `q_project_id` from this response** — you will need it in Phase 5.
+The `q_project_id` (e.g. `q_p1`) is the Quorum-assigned internal ID for fast routing;
+`project_id` is the human-readable `group_id` slug kept for display.
+
+An `{ "status": "already_onboarded", "q_project_id": "q_p1" }` response means the
+project already exists in S3 — proceed to Phase 5. Save the `q_project_id` from this
+response too. You are connecting to an existing project, not creating a new one.
 
 ---
 
@@ -142,8 +154,23 @@ $QUORUM_CLI init \
   --project-id "$PROJECT_ID"
 ```
 
-This writes `.quorum` to the current directory. The MCP server auto-discovers it
-by walking up the directory tree — no manual env vars needed.
+This writes a basic `.quorum` to the current directory. Then **add the `q_project_id`**
+from the Phase 4 response to enable fast routing (skips a DB lookup per request):
+
+```bash
+# Use the exact JSON from the next_step field in the Phase 4 response, e.g.:
+cat > .quorum << 'EOF'
+{
+  "gateway_url": "http://localhost:3001",
+  "project_id": "<project_id>",
+  "q_project_id": "q_p1"
+}
+EOF
+```
+
+The MCP server auto-discovers `.quorum` by walking up the directory tree — no manual
+env vars needed. When `q_project_id` is present, the server sends it in the
+`X-Quorum-Project` header, bypassing a `group_id → q_project_id` DB lookup on every call.
 
 ---
 
@@ -163,13 +190,8 @@ Send each engineer:
 >    This runs `quorum install` automatically via postinstall — skill, hooks, and MCP
 >    registration are all handled. No manual steps needed.
 >
-> 2. Create the project discovery file in the repo root:
->    ```bash
->    quorum init \
->      --gateway-url "<QUORUM_GATEWAY_URL>" \
->      --project-id "<project_id>"
->    ```
->    (The `.quorum` file will already be committed after Phase 9 — just pull and you're done.)
+> 2. The `.quorum` file is already committed to the repo (Phase 9) — just pull and you're done.
+>    It contains `gateway_url`, `project_id`, and `q_project_id` — no manual setup needed.
 >
 > 3. Open a new Claude Code session in the repo. Quorum will authenticate automatically
 >    via GitHub OAuth on first use — no tokens or PATs required.

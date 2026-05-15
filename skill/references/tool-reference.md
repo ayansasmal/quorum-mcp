@@ -228,9 +228,24 @@ dashboard Config editor or `POST /sync/configs`.
 
 **Returns:**
 ```json
-{ "status": "onboarded", "project_id": "platform-team", "message": "Project '...' onboarded successfully." }
-{ "status": "already_onboarded", "project_id": "platform-team", "hint": "Project already exists. Proceed to Phase 5." }
+{
+  "status": "onboarded",
+  "project_id": "platform-team",
+  "q_project_id": "q_p1",
+  "message": "Project '...' onboarded successfully.",
+  "next_step": "Add both project_id and q_project_id to your .quorum file:\n{\"gateway_url\":\"...\",\"project_id\":\"platform-team\",\"q_project_id\":\"q_p1\"}"
+}
+{
+  "status": "already_onboarded",
+  "project_id": "platform-team",
+  "q_project_id": "q_p1",
+  "hint": "Project already exists. Proceed to Phase 5."
+}
 ```
+
+**`q_project_id`** is the Quorum-assigned internal ID (e.g. `q_p1`). Include it in
+the `.quorum` file alongside `project_id` — the MCP will send it as the
+`X-Quorum-Project` header, which lets the gateway skip a DB lookup on every request.
 
 **Error conditions:**
 - `file_read_failed` — `config_path` not found or unreadable

@@ -36,35 +36,45 @@ the tool again to restart the flow.
 
 ## What the token contains
 
-The Gateway-MCP Token (ES256 JWT) carries:
+The Gateway-MCP Token (ES256 JWT) is a **slim token** — it carries only identity, not
+project context. Project context is supplied per-request via the `X-Quorum-Project` header.
 
 | Claim | Description |
 |-------|-------------|
 | `sub` | Your GitHub username |
-| `project` | The `group_id` of the project you authenticated against |
-| `role` | Your role: `principal_architect` \| `senior_engineer` \| `engineer` \| `junior` |
-| `team` | Your team name from the project config |
-| `base_confidence` | Your authority weight for knowledge writes |
-| `permissions` | Scoped permission set derived from role |
+| `is_admin` | `true` if you are a Quorum platform admin; omitted otherwise |
+| `jti` | JWT ID (unique per token; used for revocation) |
+| `exp` / `iat` | Expiry and issue timestamps |
+
+**`project`, `role`, `team`, `base_confidence` are NOT in the token.** They are
+resolved from your user profile on the gateway (`GET /user/profile/:username`, cached
+in Redis) on each request, using the `X-Quorum-Project` header to identify which
+project's membership record to read. The auth response body includes `role`, `team`,
+and `project` for display — but they are not JWT claims.
 
 ---
 
-## Project mismatch — automatic switch
+## Project mismatch
 
-If you previously authenticated against a different Quorum project and open a repo
-with a `.quorum` file pointing to a different `project_id`, the MCP server detects
-the mismatch and automatically calls `POST /auth/switch` to re-scope your token.
+Because the token is slim (no `project` claim), project context flows through the
+`.quorum` file and the `X-Quorum-Project` header — not the token. Switching projects
+is automatic: the MCP server reads `q_project_id` (or `project_id`) from the `.quorum`
+file in the current directory and sends it on every request. No re-authentication needed
+when switching repos.
 
-If the switch fails (you are not a member of the target project), you will see:
+`POST /auth/switch` and `GET /auth/projects` are **retired (410 Gone)** in v0.3.
+Use `GET /user/profile/:username` and the `X-Quorum-Project` header pattern instead.
+
+If you are not a member of the target project, you will see:
 
 ```
 status: project_mismatch
-message: You authenticated as '<other-project>' but this workspace uses '<this-project>'.
-hint: Ask your Quorum principal architect to add you to the project config, then re-authenticate.
+message: You are not a member of project '<this-project>'.
+hint: Ask your Quorum principal architect to add you to the project config, then retry.
 ```
 
 **Fix:** Ask the principal architect to add your GitHub username to
-`<project_id>.quorum.json` and re-upload the config. Then call `authenticate()`.
+`<project_id>.quorum.json` and re-upload the config. Then retry the failing tool.
 
 ---
 
