@@ -97,14 +97,19 @@ authenticate({ project_id: "other-project-id" })
 
 ---
 
-## Direct mode (no gateway)
+## Gateway-only architecture
 
-If `QUORUM_GATEWAY_URL` is not set, the MCP server runs in direct mode — it
-talks to Graphiti directly and no authentication is required. Identity falls back to:
+The MCP server **always** routes through the Quorum Gateway — there is no
+"direct mode". `QUORUM_GATEWAY_URL` defaults to `http://localhost:3001` and is
+registered automatically during `npm install -g @as-quorum/mcp`.
 
-1. `QUORUM_AUTHOR` env var
-2. `git config user.email`
-3. `anonymous`
+All Graphiti operations (`remember`, `recall`, `search`, `reflect`, `history`,
+`forget`) flow through the gateway's `/graphiti/*` proxy, which:
+- Validates your JWT before forwarding to Graphiti
+- Injects the correct `group_id` from your `X-Quorum-Project` header
+- Normalises hyphens → underscores for FalkorDB/RediSearch internally
+
+You never connect to Graphiti directly — the gateway is the only entry point.
 
 ---
 
@@ -125,7 +130,7 @@ export QUORUM_AUTHOR=your-github-username   # identity for audit trail
 | Status | Cause | Fix |
 |--------|-------|-----|
 | `auth_timeout` | Browser tab not completed within 5 min | Run the tool again to restart flow |
-| `project_mismatch` | JWT project ≠ `.quorum` project_id, and switch failed | Ask architect to add you to project config |
+| `project_mismatch` | Your GitHub username is not in the target project's config | Ask architect to add you to project config |
 | `oauth_not_available` | Gateway OAuth endpoint not responding | Check `curl http://localhost:3001/health` |
 | `registration_failed` | Dynamic client registration rejected | Check gateway logs |
 | `token_exchange_failed` | Code/verifier exchange failed | Restart flow; check gateway logs if persists |

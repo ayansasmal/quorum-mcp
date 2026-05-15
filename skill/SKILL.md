@@ -262,22 +262,19 @@ remember("topic", "key", "resolved content", {
 
 ## Authentication
 
-### Check your mode first
+### Auth is always required
 
-```bash
-echo ${QUORUM_GATEWAY_URL:-"(not set — direct mode)"}
-```
+The MCP server always routes through the Quorum Gateway — there is no direct
+mode. `QUORUM_GATEWAY_URL` defaults to `http://localhost:3001` and is registered
+automatically via `postinstall`. All Graphiti operations go through the gateway's
+`/graphiti/*` proxy, which requires a valid JWT + `X-Quorum-Project` header.
 
-| Mode | Auth required | Identity |
-|------|--------------|----------|
-| **Direct** (`QUORUM_GATEWAY_URL` not set) | ❌ None — use tools immediately | `git config user.email` |
-| **Gateway** (`QUORUM_GATEWAY_URL` set) | ✅ JWT required — run auth flow below | GitHub OAuth → JWT |
-
-**In direct mode, skip the rest of this section and use the MCP tools directly.**
+JWT required. Identity from GitHub OAuth → slim JWT `{ sub, is_admin }`.
+Override audit identity in CI with `QUORUM_AUTHOR=<github-username>`.
 
 ---
 
-### Gateway mode — auth flow
+### Auth flow
 
 Auth is **automatic** — every tool checks for a valid token and triggers the flow
 if missing. You do not need to call `authenticate()` manually.
@@ -293,9 +290,9 @@ The token is in-memory only. If the MCP server restarts, auth is needed again on
 next tool use. See [`references/login.md`](references/login.md) for the full flow,
 token contents, project mismatch handling, and error reference.
 
-### Proactive auth at session start (gateway mode only)
+### Proactive auth at session start
 
-If `QUORUM_GATEWAY_URL` is set, check auth state **before** Step 1 (`pending()`):
+Check auth state **before** Step 1 (`pending()`):
 
 ```
 authenticate()   ← returns already_authenticated (fast) or opens browser

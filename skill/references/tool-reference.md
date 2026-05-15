@@ -197,8 +197,10 @@ is stored in-memory. The browser shows "Quorum authenticated" and the flow retur
 **Trigger:** Auth runs automatically on first tool use. Call explicitly only to
 switch projects or after a `jwt_expired` / `401` response.
 
-**Direct mode** (no `QUORUM_GATEWAY_URL`): Not required. Identity resolves from
-`QUORUM_AUTHOR` env var → `git config user.email` → anonymous.
+**Always required.** `QUORUM_GATEWAY_URL` is always registered (defaults to
+`http://localhost:3001`). The MCP never connects to Graphiti directly — all
+operations route through the gateway. Identity for the audit trail resolves from
+the JWT `sub` claim (GitHub username); override with `QUORUM_AUTHOR` in CI.
 
 **Returns:**
 ```json
@@ -265,10 +267,11 @@ You cannot call them directly — the MCP server proxies through them automatica
 | `GET /schema/config` | — | JSON Schema (Draft 7) for `<group_id>.quorum.json` config files |
 | `POST /config/validate` | — | Validate a config file without uploading |
 | `GET /auth/github` | — | GitHub OAuth redirect entry point (browser flow) |
-| `POST /auth/switch` | JWT | Switch active project context (no re-OAuth) |
-| `GET /auth/projects` | JWT | List projects the authenticated user belongs to |
+| `POST /auth/switch` | — | **410 Gone** — retired in v0.3; use `X-Quorum-Project` header instead |
+| `GET /auth/projects` | — | **410 Gone** — retired in v0.3; use `GET /user/profile/:username` instead |
+| `GET /user/profile/:username` | JWT | User profile: role, projects, base_confidence (Redis-cached) |
 | `POST /config/upload` | JWT/sync token | Upload + validate config; store in S3 + sync to DDB |
-| `POST /config/validate` | — | Validate a config file without uploading |
 | `POST /sync/configs` | JWT/sync token | S3→DDB full config sync (EventBridge-compatible) |
+| `GET /graphiti/*path` | JWT + `X-Quorum-Project` | Transparent proxy to Graphiti MCP; injects `group_id`, normalises hyphens → underscores for FalkorDB |
 | `GET /.well-known/oauth-authorization-server` | — | RFC8414 OAuth metadata discovery |
 | `GET /.well-known/jwks.json` | — | JWKS endpoint for JWT verification |
