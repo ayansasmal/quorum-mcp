@@ -207,7 +207,7 @@ the JWT `sub` claim (GitHub username); override with `QUORUM_AUTHOR` in CI.
 { "status": "authenticated", "user": "github-username", "project": "platform-team",
   "role": "senior_engineer", "team": "platform", "expires_in": 3600 }
 { "status": "already_authenticated", "user": "...", "project": "...", "role": "...",
-  "note": "Already authenticated. Pass project_id to switch project." }
+  "note": "Already authenticated. Project context is per-request via X-Quorum-Project header (from .quorum file) — no re-auth needed to switch projects." }
 { "status": "project_mismatch", "message": "...", "hint": "Ask principal architect to add you." }
 ```
 

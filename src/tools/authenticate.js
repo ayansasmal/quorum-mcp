@@ -14,8 +14,11 @@
  *  10. Gateway-MCP Token stored in-memory; project context derives from .quorum file at each call
  *  11. Closes the callback listener
  *
- * The Gateway-MCP Token carries: sub, project, role, team, base_confidence, permissions.
- * It is the only token the MCP server ever holds — GitHub token never leaves the gateway.
+ * The Gateway-MCP Token (slim JWT, v0.3+) carries: sub, is_admin, jti, iat, exp.
+ * Role, team, and base_confidence are resolved per-request by verify-jwt.js from the
+ * Redis profile cache — they are NOT stored in the token. Project context is sent via
+ * the X-Quorum-Project header on each call, derived from the .quorum file.
+ * The token is the only credential the MCP server holds — GitHub token never leaves the gateway.
  *
  * Graceful degradation: if BL-12 (gateway OAuth 2.1 server) is not yet live,
  * the tool returns a clear message instead of throwing.

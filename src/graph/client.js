@@ -24,17 +24,10 @@ import { getGatewayClient } from '../gateway/client.js'
 
 const GRAPHITI_URL = process.env.GRAPHITI_URL || 'http://graphiti:8000'
 
-/**
- * Graphiti validates group_ids against ^[a-zA-Z0-9_-]+$ before FalkorDB/RediSearch.
- * Escaping hyphens as \- fails that validation. Group ID sanitization (hyphen →
- * underscore) is handled by the gateway proxy in routes/graphiti.js — not here.
- * Callers rely on PostgreSQL (via gateway) for project isolation instead.
- *
- * @deprecated group_ids are omitted from search calls; kept for reference only
- */
-function escapeGroupIds(ids) {
-  return ids
-}
+// NOTE: group_ids are omitted from Graphiti search calls in gateway mode.
+// Graphiti validates group_ids against ^[a-zA-Z0-9_-]+$ before FalkorDB/RediSearch;
+// hyphen → underscore sanitization is handled by the gateway proxy (routes/graphiti.js).
+// Project isolation is enforced at the PostgreSQL layer via q_project_id.
 
 /**
  * Dedicated Graphiti group ID for audit episodes.
