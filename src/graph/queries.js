@@ -26,14 +26,6 @@
 
 import { KnowledgeStatus } from './schema.js'
 
-/** Legal version status transitions. */
-const LEGAL_TRANSITIONS = new Map([
-  [`${KnowledgeStatus.DRAFT}->${KnowledgeStatus.ACTIVE}`, true],
-  [`${KnowledgeStatus.DRAFT}->${KnowledgeStatus.REJECTED}`, true],
-  [`${KnowledgeStatus.ACTIVE}->${KnowledgeStatus.SUPERSEDED}`, true],
-  [`${KnowledgeStatus.ACTIVE}->${KnowledgeStatus.DEPRECATED}`, true],
-])
-
 // ── Project + key registry ────────────────────────────────────────────────────
 
 /**
@@ -110,101 +102,70 @@ export async function getOrCreateKey(pg, qProjectId, topic, key) {
 // ── Version queries (keyed by q_key_id / version_id) ──────────────────────────
 
 /**
- * Get the currently ACTIVE version for a q_key_id.
- * @param {import('pg').Pool} pg
- * @param {string} qKeyId
+ * Get the currently ACTIVE version for a topic:key.
+ * Delegates to the GatewayClient — MCP never connects to PostgreSQL directly.
+ *
+ * @param {import('./schema.js').GatewayClient} pg
+ * @param {string} topic
+ * @param {string} key
  * @returns {Promise<Record<string, unknown> | null>}
  */
-export async function getCurrentVersion(pg, qKeyId) {
-  if (typeof pg.getCurrentVersion === 'function') return pg.getCurrentVersion(qKeyId)
-  const result = await pg.query(
-    `SELECT * FROM knowledge_versions
-     WHERE q_key_id = $1 AND status = $2
-     LIMIT 1`,
-    [qKeyId, KnowledgeStatus.ACTIVE],
-  )
-  return result.rows[0] ?? null
+export async function getCurrentVersion(pg, topic, key) {
+  return pg.getCurrentVersion(topic, key)
 }
 
 /**
  * Get the version that was ACTIVE on a specific date (point-in-time recall).
- * @param {import('pg').Pool} pg
- * @param {string} qKeyId
+ * Delegates to the GatewayClient — MCP never connects to PostgreSQL directly.
+ *
+ * @param {import('./schema.js').GatewayClient} pg
+ * @param {string} topic
+ * @param {string} key
  * @param {string} date - ISO date string
  * @returns {Promise<Record<string, unknown> | null>}
  */
-export async function getVersionAtDate(pg, qKeyId, date) {
-  if (typeof pg.getVersionAtDate === 'function') return pg.getVersionAtDate(qKeyId, date)
-  const result = await pg.query(
-    `SELECT * FROM knowledge_versions
-     WHERE q_key_id = $1
-       AND created_at <= $2
-       AND (
-         status = 'ACTIVE'
-         OR (
-           status = 'SUPERSEDED'
-           AND (forward_link IS NULL
-                OR (forward_link->>'at') IS NULL
-                OR (forward_link->>'at')::timestamptz > $2)
-         )
-       )
-     ORDER BY version DESC
-     LIMIT 1`,
-    [qKeyId, date],
-  )
-  return result.rows[0] ?? null
+export async function getVersionAtDate(pg, topic, key, date) {
+  return pg.getVersionAtDate(topic, key, date)
 }
 
 /**
- * Get all versions for a q_key_id, ordered newest first.
- * @param {import('pg').Pool} pg
- * @param {string} qKeyId
+ * Get all versions for a topic:key, ordered newest first.
+ * Delegates to the GatewayClient — MCP never connects to PostgreSQL directly.
+ *
+ * @param {import('./schema.js').GatewayClient} pg
+ * @param {string} topic
+ * @param {string} key
  * @returns {Promise<Array<Record<string, unknown>>>}
  */
-export async function getVersionHistory(pg, qKeyId) {
-  if (typeof pg.getVersionHistory === 'function') return pg.getVersionHistory(qKeyId)
-  const result = await pg.query(
-    `SELECT * FROM knowledge_versions
-     WHERE q_key_id = $1
-     ORDER BY version DESC`,
-    [qKeyId],
-  )
-  return result.rows
+export async function getVersionHistory(pg, topic, key) {
+  return pg.getVersionHistory(topic, key)
 }
 
 /**
- * Get a specific version number for a q_key_id.
- * @param {import('pg').Pool} pg
- * @param {string} qKeyId
+ * Get a specific version of a topic:key.
+ * Delegates to the GatewayClient — MCP never connects to PostgreSQL directly.
+ *
+ * @param {import('./schema.js').GatewayClient} pg
+ * @param {string} topic
+ * @param {string} key
  * @param {number} version
  * @returns {Promise<Record<string, unknown> | null>}
  */
-export async function getSpecificVersion(pg, qKeyId, version) {
-  if (typeof pg.getSpecificVersion === 'function') return pg.getSpecificVersion(qKeyId, version)
-  const result = await pg.query(
-    `SELECT * FROM knowledge_versions
-     WHERE q_key_id = $1 AND version = $2
-     LIMIT 1`,
-    [qKeyId, version],
-  )
-  return result.rows[0] ?? null
+export async function getSpecificVersion(pg, topic, key, version) {
+  return pg.getSpecificVersion(topic, key, version)
 }
 
 /**
- * Get the next version number for a q_key_id. Returns 1 if no versions exist yet.
- * @param {import('pg').Pool} pg
- * @param {string} qKeyId
+ * Get the next version number for a topic:key. Returns 1 if no versions exist yet.
+ * Delegates to the GatewayClient — MCP never connects to PostgreSQL directly.
+ *
+ * @param {import('./schema.js').GatewayClient} pg
+ * @param {string} topic
+ * @param {string} key
  * @returns {Promise<number>}
  */
-export async function getNextVersionNumber(pg, qKeyId) {
-  if (typeof pg.getNextVersionNumber === 'function') return pg.getNextVersionNumber(qKeyId)
-  const result = await pg.query(
-    `SELECT COALESCE(MAX(version), 0) + 1 AS next_version
-     FROM knowledge_versions
-     WHERE q_key_id = $1`,
-    [qKeyId],
-  )
-  return result.rows[0].next_version
+export async function getNextVersionNumber(pg, topic, key) {
+  return pg.getNextVersionNumber(topic, key)
 }
 
 /**
@@ -289,59 +250,18 @@ export async function getVersionsByTag(pg, tag, qProjectId) {
 
 /**
  * Transition a version's status and optionally set the forward link.
- * This is the only permitted UPDATE on knowledge_versions for status.
+ * Delegates to the GatewayClient — MCP never connects to PostgreSQL directly.
  *
- * @param {import('pg').Pool} pg
- * @param {string} versionId    e.g. 'q_k198_v3'
+ * @param {import('./schema.js').GatewayClient} pg
+ * @param {string} topic
+ * @param {string} key
+ * @param {number} version
  * @param {string} newStatus
  * @param {{ version?: number, author?: string, at?: string } | null} [forwardLink]
- *   Shape stored in the forward_link JSONB column. `at` defaults to now.
  * @returns {Promise<Record<string, unknown>>}
  */
-export async function transitionVersionStatus(pg, versionId, newStatus, forwardLink = null) {
-  if (typeof pg.transitionVersionStatus === 'function') {
-    return pg.transitionVersionStatus(versionId, newStatus, forwardLink)
-  }
-  const cur = await pg.query(
-    `SELECT version_id, status FROM knowledge_versions WHERE version_id = $1 LIMIT 1`,
-    [versionId],
-  )
-  const current = cur.rows[0]
-  if (!current) {
-    throw new Error(`Version not found: ${versionId}`)
-  }
-
-  const transitionKey = `${current.status}->${newStatus}`
-  if (!LEGAL_TRANSITIONS.has(transitionKey)) {
-    throw new Error(
-      `Illegal status transition: ${current.status} → ${newStatus} for ${versionId}`,
-    )
-  }
-
-  if (forwardLink) {
-    const fl = {
-      version: forwardLink.version ?? null,
-      author:  forwardLink.author  ?? null,
-      at:      forwardLink.at      ?? new Date().toISOString(),
-    }
-    const result = await pg.query(
-      `UPDATE knowledge_versions
-       SET status = $1, forward_link = $2, updated_at = NOW()
-       WHERE version_id = $3
-       RETURNING *`,
-      [newStatus, JSON.stringify(fl), versionId],
-    )
-    return result.rows[0]
-  }
-
-  const result = await pg.query(
-    `UPDATE knowledge_versions
-     SET status = $1, updated_at = NOW()
-     WHERE version_id = $2
-     RETURNING *`,
-    [newStatus, versionId],
-  )
-  return result.rows[0]
+export async function transitionVersionStatus(pg, topic, key, version, newStatus, forwardLink = null) {
+  return pg.transitionVersionStatus(topic, key, version, newStatus, forwardLink)
 }
 
 /**
@@ -359,20 +279,16 @@ export async function insertVersionAuditLink(pg, record) {
 }
 
 /**
- * Get the latest DRAFT version for a q_key_id (for review flow).
- * @param {import('pg').Pool} pg
- * @param {string} qKeyId
+ * Get the latest DRAFT version for a topic:key (for review flow).
+ * Delegates to the GatewayClient — MCP never connects to PostgreSQL directly.
+ *
+ * @param {import('./schema.js').GatewayClient} pg
+ * @param {string} topic
+ * @param {string} key
  * @returns {Promise<Record<string, unknown> | null>}
  */
-export async function getLatestDraftVersion(pg, qKeyId) {
-  if (typeof pg.getLatestDraftVersion === 'function') return pg.getLatestDraftVersion(qKeyId)
-  const result = await pg.query(
-    `SELECT * FROM knowledge_versions
-     WHERE q_key_id = $1 AND status = 'DRAFT'
-     ORDER BY version DESC LIMIT 1`,
-    [qKeyId],
-  )
-  return result.rows[0] ?? null
+export async function getLatestDraftVersion(pg, topic, key) {
+  return pg.getLatestDraftVersion(topic, key)
 }
 
 /**
@@ -483,19 +399,16 @@ export async function getPendingDecisions(pg, { qProjectId, qKeyId, statuses = [
 }
 
 /**
- * Count pending decisions for a specific q_key_id (ordering context).
- * @param {import('pg').Pool} pg
- * @param {string} qKeyId
+ * Count pending decisions for a specific topic:key (ordering context).
+ * Delegates to the GatewayClient — MCP never connects to PostgreSQL directly.
+ *
+ * @param {import('./schema.js').GatewayClient} pg
+ * @param {string} topic
+ * @param {string} key
  * @returns {Promise<number>}
  */
-export async function countPendingForKey(pg, qKeyId) {
-  if (typeof pg.countPendingForKey === 'function') return pg.countPendingForKey(qKeyId)
-  const result = await pg.query(
-    `SELECT COUNT(*)::int AS cnt FROM pending_decisions
-     WHERE q_key_id = $1 AND status = 'pending'`,
-    [qKeyId],
-  )
-  return result.rows[0]?.cnt ?? 0
+export async function countPendingForKey(pg, topic, key) {
+  return pg.countPendingForKey(topic, key)
 }
 
 /**
@@ -739,29 +652,20 @@ export async function getBumpLog(pg, { qKeyId, author, limit = 1 } = {}) {
  */
 
 /**
- * Increment a domain track-record counter for an author (UPSERT).
+ * Increment a domain track-record counter for an author.
  * Non-fatal — stat failures never block the primary operation.
  *
- * @param {import('pg').Pool} pg
- * @param {{ qProjectId: string, author: string, domain: string, field: DomainStatField }} options
+ * In gateway mode the GatewayClient does not expose a stats increment endpoint,
+ * so this is intentionally a no-op. Callers already use `.catch(() => {})`.
+ *
+ * @param {import('./schema.js').GatewayClient} pg
+ * @param {{ author: string, domain: string, projectId: string, field: DomainStatField }} options
  */
-export async function incrementDomainStat(pg, { qProjectId, author, domain, field }) {
+export async function incrementDomainStat(pg, { author, domain, projectId, field }) {
   if (typeof pg.incrementDomainStat === 'function') {
-    return pg.incrementDomainStat({ qProjectId, author, domain, field })
+    return pg.incrementDomainStat({ author, domain, projectId, field })
   }
-  if (!author || !domain) return
-  try {
-    await pg.query(
-      `INSERT INTO author_domain_stats (author, q_project_id, domain, ${field}, last_updated)
-       VALUES ($1, $2, $3, 1, NOW())
-       ON CONFLICT (author, q_project_id, domain) DO UPDATE
-         SET ${field} = author_domain_stats.${field} + 1,
-             last_updated = NOW()`,
-      [author, qProjectId, domain],
-    )
-  } catch (err) {
-    console.error(`[Quorum:queries] Failed to increment ${field} for ${author}/${domain}: ${err.message}`)
-  }
+  // No-op in gateway mode — stats increment endpoint not yet exposed by GatewayClient
 }
 
 /**
