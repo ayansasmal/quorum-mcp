@@ -104,7 +104,7 @@ async function fetchConflictBriefs(pg, input, projectId) {
       staleWarning = `Active version advanced from v${row.active_version_at_creation} to v${currentVersion} since this conflict was created. Review is now against the current active version.`
 
       // Persist the stale state
-      await markPendingDecisionStale(pg, row.conflict_id, staleWarning, currentVersion)
+      await markPendingDecisionStale(pg, row.conflict_id, staleWarning, currentVersion, projectId)
     }
 
     results.push({

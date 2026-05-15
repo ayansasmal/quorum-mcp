@@ -455,7 +455,7 @@ async function resolveConflictDecision(pg, input, identity, author, confidence, 
       resolution: input.resolution,
       note: input.reason,
       resolvedBy: author,
-    })
+    }, projectId)
     return {
       status: 'resolved',
       resolution: input.resolution,
@@ -469,7 +469,7 @@ async function resolveConflictDecision(pg, input, identity, author, confidence, 
   if (input.resolution === 'supersede') {
     if (!existing) return { status: 'error', message: `No ACTIVE version found for ${topic}:${key}` }
     const result = await supersede(pg, { ...input, topic, key, reason: input.reason }, existing, author, confidence, tags, TriggeredBy.CONFLICT_RESOLUTION, identity?.role, projectId)
-    await closeConflict(pg, input.conflict_id, 'supersede', input.reason, author, null, null)
+    await closeConflict(pg, input.conflict_id, 'supersede', input.reason, author, null, null, null, projectId)
     return { ...result.result, conflict_id: input.conflict_id }
   }
 
@@ -519,7 +519,7 @@ async function resolveConflictDecision(pg, input, identity, author, confidence, 
     }
 
     await closeConflict(pg, input.conflict_id, 'coexist_split', input.reason, author,
-      input.split_existing_key, input.split_incoming_key)
+      input.split_existing_key, input.split_incoming_key, null, projectId)
 
     return {
       status: 'resolved',
@@ -544,7 +544,7 @@ async function resolveConflictDecision(pg, input, identity, author, confidence, 
     )
 
     await closeConflict(pg, input.conflict_id, 'coexist_merge', input.reason, author, null, null,
-      input.merged_content)
+      input.merged_content, projectId)
 
     return { ...mergeResult.result, conflict_id: input.conflict_id, resolution: 'coexist_merge' }
   }
@@ -563,7 +563,7 @@ async function resolveConflictDecision(pg, input, identity, author, confidence, 
  * @param {string|null} splitIncomingKey
  * @param {string|null} [mergedContent]
  */
-async function closeConflict(pg, conflictId, resolution, note, resolvedBy, splitExistingKey, splitIncomingKey, mergedContent = null) {
+async function closeConflict(pg, conflictId, resolution, note, resolvedBy, splitExistingKey, splitIncomingKey, mergedContent = null, projectId = null) {
   await resolvePendingDecision(pg, conflictId, {
     status: 'resolved',
     resolution,
@@ -572,7 +572,7 @@ async function closeConflict(pg, conflictId, resolution, note, resolvedBy, split
     splitExistingKey,
     splitIncomingKey,
     mergedContent,
-  })
+  }, projectId)
 }
 
 // ── GAP-17: Webhook notification ──────────────────────────────────────────────

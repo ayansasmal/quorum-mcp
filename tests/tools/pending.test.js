@@ -114,6 +114,7 @@ describe('pending() — staleness detection', () => {
       'conflict_abc',
       expect.stringContaining('v3'),
       3,
+      'test-project',
     )
   })
 

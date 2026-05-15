@@ -394,8 +394,9 @@ export async function getDraftVersions(pg, { topic, projectId } = {}) {
  * @param {string} conflictId
  * @param {string} staleWarning
  * @param {number} currentVersion
+ * @param {string} projectId - required; prevents cross-project staling
  */
-export async function markPendingDecisionStale(pg, conflictId, staleWarning, currentVersion) {
+export async function markPendingDecisionStale(pg, conflictId, staleWarning, currentVersion, projectId) {
   if (typeof pg.updatePendingDecision === 'function') {
     return pg.updatePendingDecision(conflictId, {
       status: 'stale',
@@ -406,8 +407,8 @@ export async function markPendingDecisionStale(pg, conflictId, staleWarning, cur
   await pg.query(
     `UPDATE pending_decisions
      SET stale_warning = $1, current_active_version = $2, status = 'stale', updated_at = NOW()
-     WHERE conflict_id = $3`,
-    [staleWarning, currentVersion, conflictId],
+     WHERE conflict_id = $3 AND project_id = $4`,
+    [staleWarning, currentVersion, conflictId, projectId],
   )
 }
 
@@ -477,25 +478,31 @@ export async function insertPendingDecision(pg, record) {
  * @param {import('pg').Pool} pg
  * @param {string} conflictId
  * @param {{ status: string, resolution: string, note: string, resolvedBy: string, splitExistingKey?: string|null, splitIncomingKey?: string|null, mergedContent?: string|null }} updates
+ * @param {string} [projectId] - when provided, adds project_id boundary to prevent cross-project updates
  */
-export async function resolvePendingDecision(pg, conflictId, updates) {
+export async function resolvePendingDecision(pg, conflictId, updates, projectId) {
   if (typeof pg.updatePendingDecision === 'function') return pg.updatePendingDecision(conflictId, updates)
+  const whereClause = projectId
+    ? `WHERE conflict_id = $8 AND project_id = $9`
+    : `WHERE conflict_id = $8`
+  const params = [
+    updates.status,
+    updates.resolution,
+    updates.note,
+    updates.resolvedBy,
+    updates.splitExistingKey ?? null,
+    updates.splitIncomingKey ?? null,
+    updates.mergedContent ?? null,
+    conflictId,
+    ...(projectId ? [projectId] : []),
+  ]
   await pg.query(
     `UPDATE pending_decisions
      SET status = $1, resolution = $2, resolution_note = $3, resolved_by = $4,
          resolved_at = NOW(), updated_at = NOW(),
          split_existing_key = $5, split_incoming_key = $6, merged_content = $7
-     WHERE conflict_id = $8`,
-    [
-      updates.status,
-      updates.resolution,
-      updates.note,
-      updates.resolvedBy,
-      updates.splitExistingKey ?? null,
-      updates.splitIncomingKey ?? null,
-      updates.mergedContent ?? null,
-      conflictId,
-    ],
+     ${whereClause}`,
+    params,
   )
 }
 
