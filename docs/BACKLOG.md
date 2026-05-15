@@ -1,6 +1,7 @@
 # quorum-mcp — Backlog
 
-> MCP server backlog. Gateway/dashboard backlog lives in the `quorum` repo.
+> MCP server backlog. Gateway/dashboard backlog and gap register live in
+> `engram/docs/ANALYSIS.md` (section 9: Shipped Backlog).
 >
 > **Columns:** 🔴 Bug · 🟡 To Do · 🔵 In Progress · ✅ Done
 > **Priority:** P1 (now) → P7 (later)
