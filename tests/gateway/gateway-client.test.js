@@ -34,6 +34,8 @@ beforeEach(async () => {
 import {
   GatewayClient,
   setGatewayToken,
+  setGatewayProfile,
+  getGatewayProfile,
   _resetGatewayClient,
 } from '../../src/gateway/client.js'
 
@@ -125,5 +127,146 @@ describe('GatewayClient._get and _post — project header threading (Phase 2)', 
     await client._post('/pg/audit', { op: 'test' }, { projectId: 'proj-xyz' })
 
     expect(captured.init.headers['X-Quorum-Project']).toBe('proj-xyz')
+  })
+})
+
+describe('GatewayClient.setProjectId — instance-level project header', () => {
+  it('sends X-Quorum-Project header from setProjectId() when no options.projectId given', async () => {
+    setGatewayToken(testToken)
+    const captured = stubFetchCapture()
+
+    const client = new GatewayClient('http://localhost:3001')
+    client.setProjectId('instance-project')
+    await client._request('GET', '/health', null)
+
+    expect(captured.init.headers['X-Quorum-Project']).toBe('instance-project')
+  })
+
+  it('options.projectId takes precedence over setProjectId()', async () => {
+    setGatewayToken(testToken)
+    const captured = stubFetchCapture()
+
+    const client = new GatewayClient('http://localhost:3001')
+    client.setProjectId('instance-project')
+    await client._request('GET', '/health', null, { projectId: 'override-project' })
+
+    expect(captured.init.headers['X-Quorum-Project']).toBe('override-project')
+  })
+
+  it('does NOT send X-Quorum-Project when setProjectId(null) is called', async () => {
+    setGatewayToken(testToken)
+    const captured = stubFetchCapture()
+
+    const client = new GatewayClient('http://localhost:3001')
+    client.setProjectId(null)
+    await client._request('GET', '/health', null)
+
+    expect(captured.init.headers['X-Quorum-Project']).toBeUndefined()
+  })
+})
+
+describe('setGatewayProfile / getGatewayProfile — profile storage', () => {
+  it('stores the profile and returns it via getGatewayProfile()', () => {
+    setGatewayProfile({ role: 'principal_architect', team: 'platform', base_confidence: 0.9, project: 'my-proj' })
+
+    const profile = getGatewayProfile()
+    expect(profile).toEqual({
+      role:            'principal_architect',
+      team:            'platform',
+      base_confidence: 0.9,
+      project:         'my-proj',
+    })
+  })
+
+  it('returns null when no profile has been set', () => {
+    // _resetGatewayClient() is called in afterEach — profile is null at test start
+    expect(getGatewayProfile()).toBeNull()
+  })
+
+  it('overwrites a previously stored profile', () => {
+    setGatewayProfile({ role: 'engineer', team: 'backend', base_confidence: 0.7, project: 'old' })
+    setGatewayProfile({ role: 'principal_architect', team: 'platform', base_confidence: 0.95, project: 'new' })
+
+    expect(getGatewayProfile()?.role).toBe('principal_architect')
+    expect(getGatewayProfile()?.project).toBe('new')
+  })
+})
+
+describe('GatewayClient.getIdentity — profile-aware identity resolution', () => {
+  it('returns team from stored profile when profile was set via setGatewayProfile()', async () => {
+    setGatewayToken(testToken)
+    setGatewayProfile({ role: 'engineer', team: 'platform', base_confidence: 0.8, project: null })
+
+    const client = new GatewayClient('http://localhost:3001')
+    const identity = await client.getIdentity()
+
+    expect(identity.team).toBe('platform')
+  })
+
+  it('returns team: null when no profile has been set', async () => {
+    setGatewayToken(testToken)
+    // no setGatewayProfile() call — profile is null
+
+    const client = new GatewayClient('http://localhost:3001')
+    const identity = await client.getIdentity()
+
+    expect(identity.team).toBeNull()
+  })
+
+  it('returns role from stored profile', async () => {
+    setGatewayToken(testToken)
+    setGatewayProfile({ role: 'principal_architect', team: 'infra', base_confidence: 0.95, project: null })
+
+    const client = new GatewayClient('http://localhost:3001')
+    const identity = await client.getIdentity()
+
+    expect(identity.role).toBe('principal_architect')
+  })
+
+  it('returns base_confidence 0.7 default when profile is null', async () => {
+    setGatewayToken(testToken)
+
+    const client = new GatewayClient('http://localhost:3001')
+    const identity = await client.getIdentity()
+
+    expect(identity.base_confidence).toBe(0.7)
+  })
+
+  it('includes sub and is_admin from JWT payload', async () => {
+    setGatewayToken(testToken)
+
+    const client = new GatewayClient('http://localhost:3001')
+    const identity = await client.getIdentity()
+
+    expect(identity.name).toBe('alice')
+    expect(identity.is_admin).toBe(false)
+    expect(identity.method).toBe('oauth2_gateway')
+  })
+})
+
+describe('_resetGatewayClient — clears token and profile', () => {
+  it('clears the runtime token so subsequent _getToken() throws', async () => {
+    setGatewayToken(testToken)
+    _resetGatewayClient()
+
+    const client = new GatewayClient('http://localhost:3001')
+    await expect(client._request('GET', '/health', null)).rejects.toThrow('Not authenticated')
+  })
+
+  it('clears the stored profile so getGatewayProfile() returns null', () => {
+    setGatewayProfile({ role: 'engineer', team: 'backend', base_confidence: 0.7, project: 'x' })
+    _resetGatewayClient()
+
+    expect(getGatewayProfile()).toBeNull()
+  })
+
+  it('clears both token and profile in one call', async () => {
+    setGatewayToken(testToken)
+    setGatewayProfile({ role: 'engineer', team: 'backend', base_confidence: 0.7, project: 'x' })
+    _resetGatewayClient()
+
+    expect(getGatewayProfile()).toBeNull()
+    const client = new GatewayClient('http://localhost:3001')
+    await expect(client._request('GET', '/health', null)).rejects.toThrow('Not authenticated')
   })
 })

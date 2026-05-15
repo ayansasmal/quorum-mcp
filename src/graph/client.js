@@ -24,10 +24,29 @@ import { getGatewayClient } from '../gateway/client.js'
 
 const GRAPHITI_URL = process.env.GRAPHITI_URL || 'http://graphiti:8000'
 
-// NOTE: group_ids are omitted from Graphiti search calls in gateway mode.
-// Graphiti validates group_ids against ^[a-zA-Z0-9_-]+$ before FalkorDB/RediSearch;
-// hyphen → underscore sanitization is handled by the gateway proxy (routes/graphiti.js).
-// Project isolation is enforced at the PostgreSQL layer via q_project_id.
+// NOTE: In gateway mode (QUORUM_GATEWAY_URL set), MCP calls are forwarded
+// through gateway/routes/graphiti.js, which sanitizes hyphens → underscores
+// on group_id before reaching Graphiti. In direct mode (no gateway), this
+// client talks to Graphiti directly, so we apply the same normalization
+// locally via normalizeGroupId() as defense-in-depth. RediSearch — used by
+// FalkorDB under Graphiti — treats `-` as a NOT operator inside query
+// strings, so an un-normalized hyphenated group_id silently returns zero
+// results from search_nodes / search_memory_facts.
+
+/**
+ * Normalize a group_id for RediSearch compatibility.
+ *
+ * Graphiti's schema accepts `^[a-zA-Z0-9_-]+$` but its internal RediSearch
+ * tag/field filters reinterpret `-` as a NOT operator, silently filtering
+ * out matching records. Replacing `-` with `_` keeps the ID stable, valid
+ * under Graphiti's schema, and safe inside RediSearch.
+ *
+ * @param {string} id
+ * @returns {string}
+ */
+function normalizeGroupId(id) {
+  return typeof id === 'string' ? id.replace(/-/g, '_') : id
+}
 
 /**
  * Dedicated Graphiti group ID for audit episodes.
@@ -287,13 +306,14 @@ export async function addEpisode(content, metadata, groupId) {
   // A local tracking UUID is returned as episode_id and stored in
   // knowledge_versions.graphiti_episode_id, but it is NOT a real Graphiti UUID.
   //
-  // sanitizeGroupId: hyphens cause RediSearch syntax errors in Graphiti's
-  // internal queries. Replace with underscores for the FalkorDB graph name.
+  // normalizeGroupId: hyphens cause RediSearch (used by FalkorDB under
+  // Graphiti) to interpret `-` as NOT, dropping matching records. In gateway
+  // mode the proxy also normalizes; this is the direct-mode safeguard.
   const uuid = randomUUID()
   await callGraphiti('add_memory', {
     name:               metadata.key,
     episode_body:       content,
-    group_id:           groupId,
+    group_id:           normalizeGroupId(groupId),
     source_description: metadata.source,
   })
   return { episode_id: uuid }
@@ -311,12 +331,12 @@ export async function addEpisode(content, metadata, groupId) {
  */
 export async function addSupersedingEpisode(newContent, oldEpisodeId, metadata, groupId) {
   if (!groupId) throw new Error('addSupersedingEpisode: groupId is required')
-  // Same reason as addEpisode — do not pass uuid; sanitize group_id.
+  // Same reason as addEpisode — do not pass uuid; normalize group_id.
   const uuid = randomUUID()
   await callGraphiti('add_memory', {
     name:               metadata.key,
     episode_body:       `${newContent}\n\n[supersedes:${oldEpisodeId}] ${metadata.reason ?? 'updated'}`,
-    group_id:           groupId,
+    group_id:           normalizeGroupId(groupId),
     source_description: metadata.source,
   })
 
@@ -334,7 +354,7 @@ export async function getEvolutionChain(episodeId, groupId) {
   if (!groupId) throw new Error('getEvolutionChain: groupId is required')
   const result = await callGraphiti('search_memory_facts', {
     query: `supersedes evolution chain for ${episodeId}`,
-    // group_ids omitted — hyphenated IDs break FalkorDB RediSearch queries.
+    group_ids: [normalizeGroupId(groupId)],
   }).catch(() => ({ facts: [] }))
 
   return result.facts ?? []
@@ -343,11 +363,11 @@ export async function getEvolutionChain(episodeId, groupId) {
 /**
  * Search for knowledge nodes semantically.
  *
- * group_ids is now passed when groupId is provided — project IDs use
- * underscores (normalised at resolveCtx and the gateway Graphiti proxy)
- * so RediSearch tag filters are safe. This restores project isolation
- * for semantic search; without it, every project's knowledge would
- * appear in every other project's results.
+ * group_ids is normalized (hyphen → underscore) via normalizeGroupId before
+ * being sent to Graphiti. RediSearch — used internally by FalkorDB — treats
+ * `-` as a NOT operator, so un-normalized hyphenated group_ids silently
+ * return zero results. In gateway mode the proxy also normalizes; this is
+ * the direct-mode safeguard.
  *
  * @param {string} query
  * @param {{ limit?: number, groupIds?: string[], groupId?: string }} [options]
@@ -358,16 +378,15 @@ export async function searchNodes(query, options = {}) {
   return callGraphiti('search_nodes', {
     query,
     max_nodes: options.limit ?? 10,
-    ...(groupId ? { group_ids: [groupId] } : {}),
+    ...(groupId ? { group_ids: [normalizeGroupId(groupId)] } : {}),
   })
 }
 
 /**
  * Search for relationships/edges across the knowledge graph.
  *
- * group_ids is now passed when groupId is provided — project IDs use
- * underscores (normalised at resolveCtx and the gateway Graphiti proxy)
- * so RediSearch tag filters are safe.
+ * group_ids is normalized (hyphen → underscore) via normalizeGroupId — see
+ * searchNodes for the rationale (RediSearch NOT-operator collision).
  *
  * @param {string} query
  * @param {{ groupIds?: string[], groupId?: string }} [options]
@@ -377,18 +396,24 @@ export async function searchFacts(query, options = {}) {
   const groupId = options.groupId ?? options.groupIds?.[0]
   return callGraphiti('search_memory_facts', {
     query,
-    ...(groupId ? { group_ids: [groupId] } : {}),
+    ...(groupId ? { group_ids: [normalizeGroupId(groupId)] } : {}),
   })
 }
 
 /**
  * List episodes in a group.
+ *
+ * Note: group_ids is intentionally NOT passed here. Graphiti's get_episodes
+ * tool returns all episodes regardless; project isolation for this listing
+ * is enforced upstream at the PostgreSQL layer (q_project_id). If we ever
+ * pass group_ids here, the value must be run through normalizeGroupId() to
+ * avoid the RediSearch hyphen-as-NOT issue (see searchNodes).
+ *
  * @param {string} groupId - project isolation namespace (required)
  * @returns {Promise<{ episodes: Array<unknown> }>}
  */
 export async function getEpisodes(groupId) {
   if (!groupId) throw new Error('getEpisodes: groupId is required')
-  // group_ids omitted — see searchNodes comment.
   return callGraphiti('get_episodes', {})
 }
 
@@ -404,7 +429,7 @@ export async function deleteEpisodeSoft(episodeId, meta, groupId) {
   return callGraphiti('add_memory', {
     name:               `${meta.key}:deprecated`,
     episode_body:       `Knowledge deprecated by ${meta.author}. Reason: ${meta.reason}. Deprecated episode: ${episodeId}`,
-    group_id:           groupId,
+    group_id:           normalizeGroupId(groupId),
     source_description: 'quorum:deprecation',
     uuid:               randomUUID(),
   })

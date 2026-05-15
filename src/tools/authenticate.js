@@ -28,7 +28,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import { createServer } from 'node:http'
 import { spawnSync } from 'node:child_process'
 import { z } from 'zod'
-import { setGatewayToken, getGatewayClient, isAuthenticated } from '../gateway/client.js'
+import { setGatewayToken, setGatewayProfile, getGatewayClient, isAuthenticated } from '../gateway/client.js'
 
 const OAUTH_TIMEOUT_MS = 5 * 60 * 1000  // 5 minutes
 
@@ -154,7 +154,9 @@ function openBrowser(url) {
  * @param {string} code
  * @param {string} redirectUri
  * @param {string} verifier
- * @returns {Promise<string>} access_token (ES256 JWT)
+ * @returns {Promise<{ access_token: string, role?: string|null, team?: string|null, base_confidence?: number|null, project?: string|null }>}
+ *   The raw token response — access_token plus the v0.3 profile fields the gateway
+ *   includes in the body so the MCP can cache identity without re-fetching the profile.
  */
 async function exchangeCode(tokenEndpoint, clientId, code, redirectUri, verifier) {
   const body = new URLSearchParams({
@@ -180,7 +182,7 @@ async function exchangeCode(tokenEndpoint, clientId, code, redirectUri, verifier
   if (!data.access_token) {
     throw new Error('Token exchange succeeded but no access_token in response')
   }
-  return data.access_token
+  return data
 }
 
 // ── Handler ────────────────────────────────────────────────────────────────────
@@ -307,9 +309,9 @@ export async function handler(_gw, input, identity, ctx) {
   }
 
   // ── Step 7: Exchange code for Gateway-MCP Token ────────────────────────────
-  let accessToken
+  let tokenResponse
   try {
-    accessToken = await exchangeCode(tokenEndpoint, clientId, code, redirectUri, verifier)
+    tokenResponse = await exchangeCode(tokenEndpoint, clientId, code, redirectUri, verifier)
   } catch (err) {
     return {
       status:  'token_exchange_failed',
@@ -317,8 +319,17 @@ export async function handler(_gw, input, identity, ctx) {
     }
   }
 
-  // ── Step 8: Store token + verify ──────────────────────────────────────────
-  setGatewayToken(accessToken)
+  // ── Step 8: Store token + profile + verify ────────────────────────────────
+  // v0.3: the gateway returns role/team/base_confidence/project alongside the token
+  // because the JWT itself is slim. Cache the profile so getIdentity() can surface
+  // team/role to tool-side governance checks (e.g. enforceReviewerTeam in review.js).
+  setGatewayToken(tokenResponse.access_token)
+  setGatewayProfile({
+    role:            tokenResponse.role            ?? null,
+    team:            tokenResponse.team            ?? null,
+    base_confidence: tokenResponse.base_confidence ?? null,
+    project:         tokenResponse.project         ?? null,
+  })
 
   const gw   = getGatewayClient()
   const auth = await gw.verifyAuth()

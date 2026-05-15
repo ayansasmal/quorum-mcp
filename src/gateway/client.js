@@ -26,6 +26,17 @@ let _client = null
 /** @type {string | null} Gateway-MCP Token (ES256 JWT) — set by authenticate() tool */
 let _runtimeToken = null
 
+/**
+ * @typedef {Object} GatewayProfile
+ * @property {string | null} [role]            - User role from profile cache (e.g. 'principal_architect')
+ * @property {string | null} [team]            - User team from profile cache (e.g. 'platform')
+ * @property {number | null} [base_confidence] - User base confidence weight from profile cache
+ * @property {string | null} [project]         - Default project ID returned at authentication time
+ */
+
+/** @type {GatewayProfile | null} Server-side profile snapshot — set by authenticate() tool */
+let _runtimeProfile = null
+
 // ── JWT helpers ────────────────────────────────────────────────────────────────
 
 /**
@@ -102,12 +113,16 @@ export class GatewayClient {
     const p = decodeJwtPayload(token)
     // v0.3: JWT is slim — role/team/base_confidence come from profile cache server-side.
     // MCP-side identity uses sub + is_admin only; role defaults to null (no privilege escalation).
+    // v0.3: JWT is slim — role/team/base_confidence come from profile cache server-side.
+    // The authenticate() tool stores the profile snapshot it receives in the token-exchange
+    // response body via setGatewayProfile(); merge it here so enforceReviewerTeam() etc. work.
+    const profile = _runtimeProfile ?? {}
     return {
       name:            p.sub ?? 'unknown',
       is_admin:        p.is_admin ?? false,
-      team:            null,
-      role:            null,
-      base_confidence: 0.7,
+      team:            profile.team ?? null,
+      role:            profile.role ?? null,
+      base_confidence: profile.base_confidence ?? 0.7,
       method:          'oauth2_gateway',
     }
   }
@@ -431,10 +446,39 @@ export function setGatewayToken(token) {
 /** Backward-compatible alias for setGatewayToken. */
 export const setRuntimeToken = setGatewayToken
 
+/**
+ * Store the user profile snapshot returned by the gateway's token-exchange response.
+ *
+ * v0.3 JWTs are slim ({ sub, is_admin }) — role/team/base_confidence are no longer
+ * embedded as claims. The gateway returns them in the OAuth token response body so
+ * the MCP can attach them to identity for tool-side governance checks (e.g.
+ * enforceReviewerTeam). Profile is in-memory only and cleared when the process
+ * restarts or on explicit reset.
+ *
+ * @param {GatewayProfile | null} profile - Profile snapshot or null to clear
+ */
+export function setGatewayProfile(profile) {
+  _runtimeProfile = profile
+}
+
+/**
+ * Return the cached profile snapshot stored by the most recent authenticate() call.
+ *
+ * Returns null when no profile has been stored yet (e.g. before authenticate()
+ * completes, or after a process restart). Callers must not rely on this for
+ * authorization decisions — the gateway re-resolves the profile on every request.
+ *
+ * @returns {GatewayProfile | null}
+ */
+export function getGatewayProfile() {
+  return _runtimeProfile
+}
+
 /** Reset singleton — for testing only. */
 export function _resetGatewayClient() {
-  _client       = null
-  _runtimeToken = null
+  _client         = null
+  _runtimeToken   = null
+  _runtimeProfile = null
 }
 
 /** URL-encode a path segment. */
