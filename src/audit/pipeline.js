@@ -154,24 +154,24 @@ export async function withAuditPipeline(pg, context, operation) {
     const linkPromises = []
 
     for (const v of versionImpact.versions_created) {
+      if (!v.versionId || !v.qKeyId) continue // skip if IDs not threaded through
       linkPromises.push(
         insertVersionAuditLink(pg, {
           auditEntryId: postEntry.entry_id,
-          topic: context.topic,
-          key: context.key,
-          version: v.version,
+          versionId: v.versionId,
+          qKeyId: v.qKeyId,
           linkType: 'created',
         }).catch(() => {}),
       )
     }
 
     for (const v of versionImpact.versions_superseded) {
+      if (!v.versionId || !v.qKeyId) continue // skip if IDs not threaded through
       linkPromises.push(
         insertVersionAuditLink(pg, {
           auditEntryId: postEntry.entry_id,
-          topic: context.topic,
-          key: context.key,
-          version: v.version,
+          versionId: v.versionId,
+          qKeyId: v.qKeyId,
           linkType: 'superseded',
         }).catch(() => {}),
       )

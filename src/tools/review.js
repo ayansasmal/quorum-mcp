@@ -157,10 +157,10 @@ export async function handler(pg, input, identity, ctx) {
         },
         versionImpact: buildAuditVersionImpact(
           input.action === 'approve'
-            ? [{ version: targetVersion.version, status: KnowledgeStatus.ACTIVE, triggered_by: 'review_approval' }]
+            ? [{ version: targetVersion.version, status: KnowledgeStatus.ACTIVE, triggered_by: 'review_approval', versionId: targetVersion.version_id, qKeyId: targetVersion.q_key_id }]
             : [],
           input.action === 'reject'
-            ? [{ version: targetVersion.version, status_before: KnowledgeStatus.DRAFT }]
+            ? [{ version: targetVersion.version, status_before: KnowledgeStatus.DRAFT, versionId: targetVersion.version_id, qKeyId: targetVersion.q_key_id }]
             : [],
         ),
       }

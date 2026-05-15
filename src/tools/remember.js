@@ -247,14 +247,17 @@ async function supersede(pg, input, existing, author, confidence, tags, triggere
   // coexist between separate insertVersion + transitionVersionStatus calls.
   // For global: old ACTIVE stays until a reviewer approves the DRAFT, so the
   // legacy DRAFT insert via insertVersion is kept (no transition needed).
+  let insertedVersionId, insertedQKeyId
   if (!isGlobal) {
     const forwardLink = buildForwardLink({ supersededByVersion: nextVersion, supersededByAuthor: author })
-    await pg.atomicSupersede(
+    const atomicResult = await pg.atomicSupersede(
       { ...versionRecord, tags },
       existing.version,
       input.reason,
       forwardLink,
     )
+    insertedVersionId = atomicResult?.new_version?.version_id
+    insertedQKeyId    = atomicResult?.new_version?.q_key_id
 
     // GAP-21: mark the superseded author's entry as superseded in their domain track record
     incrementDomainStat(pg, {
@@ -264,7 +267,9 @@ async function supersede(pg, input, existing, author, confidence, tags, triggere
       field: 'superseded_count',
     }).catch(() => {})
   } else {
-    await insertVersion(pg, { ...versionRecord, tags })
+    const inserted = await insertVersion(pg, { ...versionRecord, tags })
+    insertedVersionId = inserted?.version_id
+    insertedQKeyId    = inserted?.q_key_id
   }
 
   return {
@@ -282,8 +287,8 @@ async function supersede(pg, input, existing, author, confidence, tags, triggere
       }),
     },
     versionImpact: buildAuditVersionImpact(
-      [{ version: nextVersion, status: newStatus, triggered_by: triggeredBy }],
-      isGlobal ? [] : [{ version: existing.version, status_before: KnowledgeStatus.ACTIVE }],
+      [{ version: nextVersion, status: newStatus, triggered_by: triggeredBy, versionId: insertedVersionId, qKeyId: insertedQKeyId }],
+      isGlobal ? [] : [{ version: existing.version, status_before: KnowledgeStatus.ACTIVE, versionId: existing.version_id, qKeyId: existing.q_key_id }],
     ),
   }
 }
@@ -338,7 +343,7 @@ async function storeFirst(pg, input, author, confidence, tags, triggeredBy, auth
     projectId,
   })
 
-  await insertVersion(pg, { ...versionRecord, tags })
+  const inserted = await insertVersion(pg, { ...versionRecord, tags })
 
   return {
     result: {
@@ -350,7 +355,7 @@ async function storeFirst(pg, input, author, confidence, tags, triggeredBy, auth
       episode_id: graphitiResult.episode_id,
     },
     versionImpact: buildAuditVersionImpact(
-      [{ version: 1, status, triggered_by: triggeredBy }],
+      [{ version: 1, status, triggered_by: triggeredBy, versionId: inserted?.version_id, qKeyId: inserted?.q_key_id }],
       [],
     ),
   }
