@@ -22,7 +22,9 @@ describe('registerMcpServer', () => {
 
     expect(spawnSync).toHaveBeenCalledWith(
       'claude',
-      ['mcp', 'add', '--scope', 'user', 'quorum', '--', 'node', '/pkg/dist/server.js'],
+      ['mcp', 'add', '--scope', 'user', 'quorum',
+        '-e', expect.stringMatching(/^QUORUM_GATEWAY_URL=.+/),
+        '--', 'node', '/pkg/dist/server.js'],
       { stdio: 'pipe' },
     )
   })

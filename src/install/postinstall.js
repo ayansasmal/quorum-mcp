@@ -37,17 +37,34 @@ const pkgRoot = existsSync(join(__dirname, 'skill'))
  * @throws {Error} If the claude CLI is not found or exits non-zero
  */
 export function registerMcpServer(serverPath) {
-  const result = spawnSync(
-    'claude',
-    ['mcp', 'add', '--scope', 'user', 'quorum', '--', 'node', serverPath],
-    { stdio: 'pipe' },
-  )
+  // QUORUM_GATEWAY_URL defaults to localhost for local dev; engineers running
+  // against a central gateway should update it via:
+  //   claude mcp add --scope user quorum -e QUORUM_GATEWAY_URL=https://quorum.company.internal -- node <path>
+  const gatewayUrl = process.env.QUORUM_GATEWAY_URL ?? 'http://localhost:3001'
+  const args = [
+    'mcp', 'add', '--scope', 'user', 'quorum',
+    '-e', `QUORUM_GATEWAY_URL=${gatewayUrl}`,
+    '--', 'node', serverPath,
+  ]
+
+  let result = spawnSync('claude', args, { stdio: 'pipe' })
 
   if (result.error) {
     throw new Error(`claude CLI not found: ${result.error.message}`)
   }
+
+  // If the server is already registered, remove it and re-add so env vars stay current.
   if (result.status !== 0) {
     const stderr = result.stderr?.toString().trim() || ''
+    if (stderr.includes('already exists')) {
+      spawnSync('claude', ['mcp', 'remove', 'quorum', '-s', 'user'], { stdio: 'pipe' })
+      result = spawnSync('claude', args, { stdio: 'pipe' })
+      if (result.error) throw new Error(`claude CLI not found: ${result.error.message}`)
+      if (result.status !== 0) {
+        throw new Error(`claude mcp add failed (exit ${result.status}): ${result.stderr?.toString().trim()}`)
+      }
+      return
+    }
     throw new Error(`claude mcp add failed (exit ${result.status}): ${stderr}`)
   }
 }

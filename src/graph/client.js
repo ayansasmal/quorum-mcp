@@ -20,6 +20,7 @@
 
 import { randomUUID } from 'crypto'
 import { log } from '../logger.js'
+import { getGatewayClient } from '../gateway/client.js'
 
 const GRAPHITI_URL = process.env.GRAPHITI_URL || 'http://graphiti:8000'
 
@@ -132,6 +133,11 @@ async function initSession(endpoint, authHeaders = {}) {
     }),
   })
 
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    throw new GraphitiConnectionError(
+      `Graphiti session init failed (${res.status}): ${body}`)
+  }
   const sessionId = res.headers.get('mcp-session-id')
   if (!sessionId) throw new GraphitiConnectionError('Graphiti MCP did not return a session ID')
   _sessionId = sessionId
@@ -183,17 +189,28 @@ async function callGraphiti(tool, params, maxRetries = 3) {
   const endpoint = `${baseUrl}/mcp`
   log.debug('graphiti call', { tool, groupId: params.group_id, endpoint })
 
-  // In gateway mode, include Authorization header from the gateway client
+  // In gateway mode, attach JWT + X-Quorum-Project so the /graphiti/* proxy
+  // can verify the token and inject group_id before forwarding to Graphiti.
+  // Static import (not dynamic) ensures the same _runtimeToken singleton used
+  // by authenticate() is read here — dynamic imports can create a second
+  // module instance in bundled output, splitting the singleton.
   let authHeaders = {}
   if (useGateway) {
-    try {
-      const { getGatewayClient } = await import('../gateway/client.js')
-      const gwClient = getGatewayClient()
-      if (gwClient) {
-        const { token } = await gwClient._getToken()
+    const gwClient = getGatewayClient()
+    if (gwClient) {
+      try {
+        const { token } = gwClient._getToken()
         authHeaders = { Authorization: `Bearer ${token}` }
+        // X-Quorum-Project tells the gateway which project's group_id to inject.
+        // params.group_id carries the caller-supplied value; the proxy overwrites
+        // it with the sanitized project ID derived from this header.
+        const projectId = params.group_id ?? null
+        if (projectId) authHeaders['X-Quorum-Project'] = projectId
+      } catch (err) {
+        throw new GraphitiConnectionError(
+          `Graphiti call requires authentication — call authenticate() first: ${err.message}`, err)
       }
-    } catch { /* gateway client not available — fall through */ }
+    }
   }
 
   let lastError
