@@ -229,17 +229,24 @@ describe('remember — superseding existing version', () => {
     access_count: 0,
   }
 
+  // Gap 3: non-global supersede uses the gateway's atomic endpoint.
+  // Provide a pg with atomicSupersede so the handler can be exercised.
+  let supersedePg
+
   beforeEach(async () => {
-    const { getCurrentVersion, getNextVersionNumber, insertVersion, transitionVersionStatus } = await import('../../src/graph/queries.js')
+    const { getCurrentVersion, getNextVersionNumber, insertVersion } = await import('../../src/graph/queries.js')
     const { addSupersedingEpisode } = await import('../../src/graph/client.js')
     const { detectConflict } = await import('../../src/governance/conflict.js')
 
     vi.mocked(getCurrentVersion).mockResolvedValue(existingVersion)
     vi.mocked(getNextVersionNumber).mockResolvedValue(2)
     vi.mocked(insertVersion).mockResolvedValue({ id: 2, version: 2 })
-    vi.mocked(transitionVersionStatus).mockResolvedValue()
     vi.mocked(addSupersedingEpisode).mockResolvedValue({ episode_id: 'ep_002' })
     vi.mocked(detectConflict).mockResolvedValue({ conflict: false })
+
+    supersedePg = {
+      atomicSupersede: vi.fn().mockResolvedValue({ inserted: true, superseded_version: 1, rows_updated: 1 }),
+    }
   })
 
   afterEach(() => vi.clearAllMocks())
@@ -248,7 +255,7 @@ describe('remember — superseding existing version', () => {
     const { handler } = await import('../../src/tools/remember.js')
 
     await expect(
-      handler(mockPg, {
+      handler(supersedePg, {
         topic: 'auth',
         key: 'token-strategy',
         content: 'Use JWT for all services',
@@ -262,7 +269,7 @@ describe('remember — superseding existing version', () => {
     const { handler } = await import('../../src/tools/remember.js')
     const { addEpisode, addSupersedingEpisode } = await import('../../src/graph/client.js')
 
-    await handler(mockPg, {
+    await handler(supersedePg, {
       topic: 'auth',
       key: 'token-strategy',
       content: 'Use JWT for all services',
@@ -277,7 +284,7 @@ describe('remember — superseding existing version', () => {
   it('returns v2 on successful supersession', async () => {
     const { handler } = await import('../../src/tools/remember.js')
 
-    const result = await handler(mockPg, {
+    const result = await handler(supersedePg, {
       topic: 'auth',
       key: 'token-strategy',
       content: 'Use JWT for all services',
@@ -290,21 +297,25 @@ describe('remember — superseding existing version', () => {
     expect(result.superseded_version).toBe(1)
   })
 
-  it('calls transitionVersionStatus to mark old version as SUPERSEDED', async () => {
+  it('calls atomicSupersede to mark old version as SUPERSEDED in a single transaction (Gap 3)', async () => {
     const { handler } = await import('../../src/tools/remember.js')
-    const { transitionVersionStatus } = await import('../../src/graph/queries.js')
+    const { transitionVersionStatus, insertVersion } = await import('../../src/graph/queries.js')
 
-    await handler(mockPg, {
+    await handler(supersedePg, {
       topic: 'auth',
       key: 'token-strategy',
       content: 'Use JWT for all services',
       reason: 'Lambda does not support sessions',
     }, humanIdentity, testCtx)
 
-    expect(transitionVersionStatus).toHaveBeenCalledOnce()
-    const call = vi.mocked(transitionVersionStatus).mock.calls[0]
-    expect(call[3]).toBe(1)            // old version
-    expect(call[4]).toBe('SUPERSEDED') // new status
+    expect(supersedePg.atomicSupersede).toHaveBeenCalledOnce()
+    const [newVersion, supersedesVersion] = supersedePg.atomicSupersede.mock.calls[0]
+    expect(supersedesVersion).toBe(1)
+    expect(newVersion.status).toBe('ACTIVE')
+
+    // Legacy two-call pattern must no longer be invoked
+    expect(vi.mocked(insertVersion)).not.toHaveBeenCalled()
+    expect(vi.mocked(transitionVersionStatus)).not.toHaveBeenCalled()
   })
 })
 

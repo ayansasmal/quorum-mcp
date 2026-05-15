@@ -236,6 +236,30 @@ export class GatewayClient {
     return this._patch(`/pg/versions/${enc(topic)}/${enc(key)}/${version}`, { newStatus, forwardLink })
   }
 
+  /**
+   * Atomically insert a new version and transition the prior ACTIVE version to
+   * SUPERSEDED in a single PostgreSQL transaction (Gap 3).
+   *
+   * Replaces the legacy two-call pattern (insertVersion → transitionVersionStatus)
+   * which left a race window where two ACTIVE rows could coexist for the same
+   * topic:key. The gateway's UPDATE is guarded by `status = 'ACTIVE'`, so a
+   * concurrent supersession lands rows_updated=0 — callers can detect it.
+   *
+   * @param {Record<string, unknown>} newVersionRecord - Full version row to insert.
+   * @param {number} supersedesVersion - Version number of the row being superseded.
+   * @param {string} supersedesReason - Reason for supersession (governance audit).
+   * @param {{ supersededByVersion: number, supersededByAuthor: string } | null} forwardLink
+   * @returns {Promise<{ inserted: boolean, superseded_version: number, rows_updated: number }>}
+   */
+  async atomicSupersede(newVersionRecord, supersedesVersion, supersedesReason, forwardLink) {
+    return this._post('/pg/versions/supersede', {
+      new_version: newVersionRecord,
+      supersedes_version: supersedesVersion,
+      supersedes_reason: supersedesReason,
+      forward_link: forwardLink,
+    })
+  }
+
   async getVersionsByTag(tag) {
     return this._get(`/pg/versions/by-tag/${enc(tag)}`)
   }

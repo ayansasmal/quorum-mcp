@@ -242,13 +242,19 @@ async function supersede(pg, input, existing, author, confidence, tags, triggere
     projectId,
   })
 
-  await insertVersion(pg, { ...versionRecord, tags })
-
-  // For non-global: atomically supersede old version now.
-  // For global: old ACTIVE stays until a reviewer approves the DRAFT.
+  // For non-global: atomically supersede in a single transaction via the
+  // gateway (Gap 3) — eliminates the race window where two ACTIVE rows could
+  // coexist between separate insertVersion + transitionVersionStatus calls.
+  // For global: old ACTIVE stays until a reviewer approves the DRAFT, so the
+  // legacy DRAFT insert via insertVersion is kept (no transition needed).
   if (!isGlobal) {
     const forwardLink = buildForwardLink({ supersededByVersion: nextVersion, supersededByAuthor: author })
-    await transitionVersionStatus(pg, input.topic, input.key, existing.version, KnowledgeStatus.SUPERSEDED, forwardLink, projectId)
+    await pg.atomicSupersede(
+      { ...versionRecord, tags },
+      existing.version,
+      input.reason,
+      forwardLink,
+    )
 
     // GAP-21: mark the superseded author's entry as superseded in their domain track record
     incrementDomainStat(pg, {
@@ -257,6 +263,8 @@ async function supersede(pg, input, existing, author, confidence, tags, triggere
       projectId,
       field: 'superseded_count',
     }).catch(() => {})
+  } else {
+    await insertVersion(pg, { ...versionRecord, tags })
   }
 
   return {
