@@ -298,8 +298,10 @@ export class GatewayClient {
 
   async getPendingDecisions(opts = {}) {
     const query = {}
-    if (opts.topic)         query.topic         = opts.topic
-    if (opts.include_stale) query.include_stale = 'true'
+    if (opts.topic) query.topic = opts.topic
+    if (opts.include_stale || (Array.isArray(opts.statuses) && opts.statuses.includes('stale'))) {
+      query.include_stale = 'true'
+    }
     return this._get('/pg/pending', Object.keys(query).length ? query : undefined)
   }
 

@@ -18,7 +18,6 @@ export const schema = z.object({
   topic: z.string().min(1),
   key: z.string().min(1),
   reason: z.string().min(1).describe('Required: why this knowledge is being deprecated'),
-  author: z.string().min(1),
   session_id: z.string().optional(),
 })
 
@@ -32,6 +31,7 @@ export const schema = z.object({
 export async function handler(pg, input, identity, ctx) {
   const projectId = ctx?.projectId
   if (!projectId) throw new Error('forget: ctx.projectId is required — ensure a .quorum file exists in this workspace')
+  const author = identity?.name ?? 'anonymous'
 
   // Constitutional rules checked before pipeline wrapping
   enforceNoHardDelete('forget')
@@ -41,7 +41,7 @@ export async function handler(pg, input, identity, ctx) {
     pg,
     {
       tool: 'forget',
-      author: input.author,
+      author,
       sessionId: input.session_id,
       topic: input.topic,
       key: input.key,
@@ -63,7 +63,7 @@ export async function handler(pg, input, identity, ctx) {
         await deleteEpisodeSoft(existing.graphiti_episode_id, {
           key: `${input.topic}:${input.key}`,
           reason: input.reason,
-          author: input.author,
+          author,
         }, projectId).catch(() => {})
       }
 
@@ -74,7 +74,7 @@ export async function handler(pg, input, identity, ctx) {
         key: input.key,
         version: nextVersion,
         content: deprecationContent,
-        author: input.author,
+        author,
         triggeredBy: TriggeredBy.ENGINEER_DECISION,
         auditEntryId: 'pre_pending',
         supersedesVersion: existing.version,
@@ -87,7 +87,7 @@ export async function handler(pg, input, identity, ctx) {
       await transitionVersionStatus(
         pg, input.topic, input.key, existing.version,
         KnowledgeStatus.DEPRECATED,
-        { supersededByVersion: nextVersion, supersededByAuthor: input.author },
+        { version: nextVersion, author, at: new Date().toISOString() },
         projectId,
       )
 

@@ -400,7 +400,7 @@ async function storePendingConflictCheck(pg, input, author, confidence, tags, tr
     project_id: projectId,
   })
 
-  await insertVersion(pg, { ...versionRecord, tags, project_id: projectId })
+  const inserted = await insertVersion(pg, { ...versionRecord, tags, project_id: projectId })
 
   console.error(`[Quorum:remember] Graphiti unavailable — stored ${input.topic}:${input.key} v${version} as PENDING_CONFLICT_CHECK for deferred re-check`)
 
@@ -415,7 +415,7 @@ async function storePendingConflictCheck(pg, input, author, confidence, tags, tr
       warning: 'Conflict check deferred — Graphiti unavailable. Entry stored as PENDING_CONFLICT_CHECK and will be re-checked automatically when Graphiti recovers.',
     },
     versionImpact: buildAuditVersionImpact(
-      [{ version, status: KnowledgeStatus.PENDING_CONFLICT_CHECK, triggered_by: triggeredBy }],
+      [{ version, status: KnowledgeStatus.PENDING_CONFLICT_CHECK, triggered_by: triggeredBy, versionId: inserted?.version_id, qKeyId: inserted?.q_key_id }],
       [],
     ),
   }

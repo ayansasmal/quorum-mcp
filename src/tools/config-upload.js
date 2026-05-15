@@ -83,7 +83,7 @@ export async function handler(gw, input) {
       q_project_id: result.q_project_id ?? null,
       message:      result.message ?? 'Project onboarded successfully.',
       next_step:    result.q_project_id
-        ? `Add both project_id and q_project_id to your .quorum file:\n{"gateway_url":"${gw._baseUrl ?? 'YOUR_GATEWAY_URL'}","project_id":"${configData.group_id}","q_project_id":"${result.q_project_id}"}`
+        ? `Add both project_id and q_project_id to your .quorum file:\n{"gateway_url":"${gw._gatewayUrl ?? 'YOUR_GATEWAY_URL'}","project_id":"${configData.group_id}","q_project_id":"${result.q_project_id}"}`
         : 'Create a .quorum file with gateway_url and project_id.',
     }
   } catch (err) {
