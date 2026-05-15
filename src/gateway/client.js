@@ -178,7 +178,10 @@ export class GatewayClient {
     if (!response.ok) {
       const errBody = await response.json().catch(() => ({}))
       log.error('gateway request failed', { method, path, status: response.status, body: errBody })
-      throw new Error(`Gateway ${method} ${path} failed (${response.status}): ${errBody.message ?? response.statusText}`)
+      const err = new Error(`Gateway ${method} ${path} failed (${response.status}): ${errBody.message ?? response.statusText}`)
+      err.status = response.status
+      err.body   = errBody
+      throw err
     }
 
     if (response.status === 204) return null

@@ -22,9 +22,10 @@ const FILENAME = '.quorum'
 
 /**
  * @typedef {Object} QuorumFileConfig
- * @property {string} gateway_url - Quorum Gateway base URL
- * @property {string} project_id  - Project namespace for this repository
- * @property {string} [_source]   - Resolved file path (for diagnostics)
+ * @property {string} gateway_url    - Quorum Gateway base URL
+ * @property {string} project_id     - Project group_id slug (human-readable, display only)
+ * @property {string} [q_project_id] - Quorum-assigned project ID (q_p{n}), preferred for ops
+ * @property {string} [_source]      - Resolved file path (for diagnostics)
  */
 
 /**
@@ -79,9 +80,10 @@ export function loadQuorumFile(filePath) {
     }
 
     return {
-      gateway_url: String(raw.gateway_url).replace(/\/$/, '').trim(),
-      project_id:  String(raw.project_id).trim(),
-      _source:     filePath,
+      gateway_url:  String(raw.gateway_url).replace(/\/$/, '').trim(),
+      project_id:   String(raw.project_id).trim(),
+      q_project_id: raw.q_project_id ? String(raw.q_project_id).trim() : undefined,
+      _source:      filePath,
     }
   } catch (err) {
     console.error(`[Quorum] Failed to read .quorum file at ${filePath}: ${err.message}`)
@@ -122,6 +124,10 @@ export function applyQuorumFileDefaults(startDir) {
   if (!process.env.QUORUM_PROJECT_ID) {
     process.env.QUORUM_PROJECT_ID = cfg.project_id
     console.error(`[Quorum] QUORUM_PROJECT_ID set from ${filePath}`)
+  }
+  if (!process.env.QUORUM_Q_PROJECT_ID && cfg.q_project_id) {
+    process.env.QUORUM_Q_PROJECT_ID = cfg.q_project_id
+    console.error(`[Quorum] QUORUM_Q_PROJECT_ID set from ${filePath}`)
   }
 
   return cfg

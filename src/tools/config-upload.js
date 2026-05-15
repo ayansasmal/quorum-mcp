@@ -78,18 +78,23 @@ export async function handler(gw, input) {
   try {
     const result = await gw._post('/config/upload', configData)
     return {
-      status: 'onboarded',
-      project_id: result.project_id ?? configData.group_id,
-      message: result.message ?? 'Project onboarded successfully.',
+      status:       'onboarded',
+      project_id:   result.project_id ?? configData.group_id,
+      q_project_id: result.q_project_id ?? null,
+      message:      result.message ?? 'Project onboarded successfully.',
+      next_step:    result.q_project_id
+        ? `Add both project_id and q_project_id to your .quorum file:\n{"gateway_url":"${gw._baseUrl ?? 'YOUR_GATEWAY_URL'}","project_id":"${configData.group_id}","q_project_id":"${result.q_project_id}"}`
+        : 'Create a .quorum file with gateway_url and project_id.',
     }
   } catch (err) {
     // 409 already_onboarded — not an error; project exists, proceed to Phase 5
-    if (err.message.includes('(409)')) {
+    if (err.status === 409 || err.message.includes('(409)')) {
       return {
-        status: 'already_onboarded',
-        project_id: configData.group_id,
-        message: 'Project already exists in Quorum.',
-        hint: 'Proceed to Phase 5 — create the .quorum discovery file. You are connecting to an existing project, not creating a new one.',
+        status:       'already_onboarded',
+        project_id:   configData.group_id,
+        q_project_id: err.body?.q_project_id ?? null,
+        message:      'Project already exists in Quorum.',
+        hint:         'Proceed to Phase 5 — create the .quorum discovery file. You are connecting to an existing project, not creating a new one.',
       }
     }
 

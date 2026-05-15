@@ -86,7 +86,7 @@ const tools = [
  *   2. PWD / cwd — walk up for .quorum file
  *   3. Explicit env vars (QUORUM_PROJECT_ID / QUORUM_GROUP_ID)
  *
- * @returns {Promise<{ projectId: string, gatewayUrl: string } | null>}
+ * @returns {Promise<{ projectId: string, groupId?: string, gatewayUrl: string } | null>}
  */
 async function resolveCtx() {
   // 1. Try MCP roots (Claude Code sends workspace dir per session — safe for parallel sessions)
@@ -101,12 +101,13 @@ async function resolveCtx() {
       const dir = decodeURIComponent(uri.slice('file://'.length))
       const cfg = findAndLoadQuorumFile(dir)
       if (cfg) {
-        // Normalize hyphens → underscores: FalkorDB uses group_id as a graph name and
-        // RediSearch treats hyphens as NOT operators in tag filters, causing silent empty
-        // results. The canonical form is underscore-separated (e.g. amethyst_munchkin).
-        const projectId = cfg.project_id.trim().replace(/-/g, '_')
+        // Prefer q_project_id (canonical) when present; otherwise normalize group_id.
+        // Hyphen→underscore normalization avoids RediSearch tag-filter pitfalls in FalkorDB.
+        const projectId = cfg.q_project_id
+          ? cfg.q_project_id.trim()
+          : cfg.project_id.trim().replace(/-/g, '_')
         log.debug('resolveCtx: resolved from MCP roots', { dir, projectId, gatewayUrl: cfg.gateway_url })
-        return { projectId, gatewayUrl: cfg.gateway_url }
+        return { projectId, groupId: cfg.project_id.trim(), gatewayUrl: cfg.gateway_url }
       }
     }
   } catch (err) {
@@ -117,19 +118,22 @@ async function resolveCtx() {
   for (const dir of [process.env.PWD, process.cwd()].filter(Boolean)) {
     const cfg = findAndLoadQuorumFile(dir)
     if (cfg) {
-      const projectId = cfg.project_id.trim().replace(/-/g, '_')
+      const projectId = cfg.q_project_id
+        ? cfg.q_project_id.trim()
+        : cfg.project_id.trim().replace(/-/g, '_')
       log.debug('resolveCtx: resolved from cwd', { dir, projectId, gatewayUrl: cfg.gateway_url })
-      return { projectId, gatewayUrl: cfg.gateway_url }
+      return { projectId, groupId: cfg.project_id.trim(), gatewayUrl: cfg.gateway_url }
     }
   }
 
   // 3. Fall back to explicit env vars (CI/enterprise contexts)
-  const rawProjectId = process.env.QUORUM_PROJECT_ID?.trim() ?? process.env.QUORUM_GROUP_ID?.trim() ?? null
-  const gatewayUrl   = process.env.QUORUM_GATEWAY_URL ?? null
-  if (rawProjectId) {
-    const projectId = rawProjectId.replace(/-/g, '_')
+  const rawQProjectId = process.env.QUORUM_Q_PROJECT_ID?.trim() ?? null
+  const rawProjectId  = process.env.QUORUM_PROJECT_ID?.trim() ?? process.env.QUORUM_GROUP_ID?.trim() ?? null
+  const gatewayUrl    = process.env.QUORUM_GATEWAY_URL ?? null
+  if (rawQProjectId || rawProjectId) {
+    const projectId = rawQProjectId ?? rawProjectId.replace(/-/g, '_')
     log.debug('resolveCtx: resolved from env vars', { projectId, gatewayUrl })
-    return { projectId, gatewayUrl: gatewayUrl ?? 'http://localhost:3001' }
+    return { projectId, groupId: rawProjectId ?? null, gatewayUrl: gatewayUrl ?? 'http://localhost:3001' }
   }
 
   log.warn('resolveCtx: no project context found — no .quorum file and no env vars set')
