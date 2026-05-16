@@ -397,7 +397,7 @@ async function storePendingConflictCheck(pg, input, author, confidence, tags, tr
     status: KnowledgeStatus.PENDING_CONFLICT_CHECK,
     supersedes_version: existing?.version ?? null,
     supersedes_reason: input.reason ?? null,
-    project_id: projectId,
+    projectId,
   })
 
   const inserted = await insertVersion(pg, { ...versionRecord, tags, project_id: projectId })

@@ -147,7 +147,7 @@ function formatVersion(version, opts) {
     }
   }
 
-  xml += `\n${version.content ?? ''}`
+  xml += `\n${version.summary ?? version.content ?? ''}`
   xml += `\n</quorum_memory>`
 
   return xml
