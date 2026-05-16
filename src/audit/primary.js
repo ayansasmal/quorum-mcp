@@ -25,7 +25,6 @@ export async function writeEntry(entry) {
   return addEpisode(body, {
     key: `audit:${entry.entry_id}`,
     source: 'quorum:audit',
-    groupId: AUDIT_GROUP_ID,
     metadata: {
       entry_id: entry.entry_id,
       operation: entry.operation,
@@ -35,7 +34,7 @@ export async function writeEntry(entry) {
       entry_hash: entry.entry_hash,
       version_impact: entry.version_impact,
     },
-  })
+  }, AUDIT_GROUP_ID)
 }
 
 /**
