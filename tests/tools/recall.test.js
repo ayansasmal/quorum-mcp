@@ -245,3 +245,85 @@ describe('recall — specific version mode', () => {
     expect(result).toContain('version="2"')
   })
 })
+
+// ── Regression: Bug D — summary column, not content ───────────────────────────
+// The PostgreSQL knowledge_versions table stores knowledge in the `summary`
+// column. The gateway returns raw PG rows, so version.content is always
+// undefined in production. formatVersion must read summary (with content as a
+// fallback for any future aliasing).
+
+describe('recall — regression: version.summary used for XML body (Bug D)', () => {
+  afterEach(() => vi.clearAllMocks())
+
+  it('renders content from summary column (no content field)', async () => {
+    const { getCurrentVersion } = await import('../../src/graph/queries.js')
+    // Simulate the exact shape returned by the gateway: summary present, content absent
+    vi.mocked(getCurrentVersion).mockResolvedValue({
+      id: 1,
+      topic: 'db',
+      key: 'pool-size',
+      version: 1,
+      status: 'ACTIVE',
+      summary: 'PostgreSQL pool size capped at 10 per instance',
+      // content is intentionally absent — this is the production PG row shape
+      author: 'ayan',
+      triggered_by: 'human_decision',
+      confidence: 0.9,
+      created_at: new Date(Date.now() - 10 * 24 * 3600 * 1000).toISOString(),
+      created_by_audit: 'entry_001',
+      supersedes_version: null,
+      superseded_by_version: null,
+      superseded_by_author: null,
+      superseded_at: null,
+    })
+
+    const { handler } = await import('../../src/tools/recall.js')
+    const result = await handler({}, { topic: 'db', key: 'pool-size' }, undefined, testCtx)
+
+    expect(result).toContain('PostgreSQL pool size capped at 10 per instance')
+  })
+
+  it('prefers summary over content when both are present', async () => {
+    const { getCurrentVersion } = await import('../../src/graph/queries.js')
+    vi.mocked(getCurrentVersion).mockResolvedValue({
+      ...makeVersion(),
+      summary: 'Use JWT — from summary column',
+      content: 'Use JWT — from content column (stale alias)',
+    })
+
+    const { handler } = await import('../../src/tools/recall.js')
+    const result = await handler({}, { topic: 'auth', key: 'token-strategy' }, undefined, testCtx)
+
+    expect(result).toContain('Use JWT — from summary column')
+    expect(result).not.toContain('Use JWT — from content column (stale alias)')
+  })
+
+  it('falls back to content when summary is absent', async () => {
+    const { getCurrentVersion } = await import('../../src/graph/queries.js')
+    vi.mocked(getCurrentVersion).mockResolvedValue({
+      ...makeVersion(),
+      summary: undefined,
+      content: 'Fallback content value',
+    })
+
+    const { handler } = await import('../../src/tools/recall.js')
+    const result = await handler({}, { topic: 'auth', key: 'token-strategy' }, undefined, testCtx)
+
+    expect(result).toContain('Fallback content value')
+  })
+
+  it('renders empty body without error when both summary and content are absent', async () => {
+    const { getCurrentVersion } = await import('../../src/graph/queries.js')
+    vi.mocked(getCurrentVersion).mockResolvedValue({
+      ...makeVersion(),
+      summary: undefined,
+      content: undefined,
+    })
+
+    const { handler } = await import('../../src/tools/recall.js')
+    const result = await handler({}, { topic: 'auth', key: 'token-strategy' }, undefined, testCtx)
+
+    expect(result).toContain('<quorum_memory')
+    expect(result).toContain('</quorum_memory>')
+  })
+})

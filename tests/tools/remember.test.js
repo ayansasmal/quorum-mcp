@@ -419,3 +419,82 @@ describe('remember — conflict detection', () => {
     expect(result.split_suggestion).toBe('First for OLTP services, second for batch jobs')
   })
 })
+
+// ── Regression: Bug E — storePendingConflictCheck projectId casing ─────────────
+// buildVersionRecord(params) guards on params.projectId (camelCase).
+// storePendingConflictCheck previously passed project_id (snake_case), causing
+// "buildVersionRecord: projectId is required" on the PENDING_CONFLICT_CHECK path.
+//
+// This path triggers on a SUPERSEDE operation when detectConflict returns
+// { graphiti_unavailable: true } — meaning Graphiti is down and the conflict
+// check must be deferred.
+
+describe('remember — regression: storePendingConflictCheck uses camelCase projectId (Bug E)', () => {
+  // Existing version fixture for the supersede path
+  const existingVersion = {
+    id: 1,
+    version: 1,
+    status: 'ACTIVE',
+    content: 'Old retry strategy',
+    summary: 'Old retry strategy',
+    author: 'alice',
+    q_key_id: 'q_k1',
+    version_id: 'q_k1_v1',
+  }
+
+  afterEach(() => vi.clearAllMocks())
+
+  it('does not throw when detectConflict signals graphiti_unavailable on supersede', async () => {
+    const { getCurrentVersion, getNextVersionNumber, insertVersion } = await import('../../src/graph/queries.js')
+    const { detectConflict } = await import('../../src/governance/conflict.js')
+
+    // Supersede path: existing version present
+    vi.mocked(getCurrentVersion).mockResolvedValue(existingVersion)
+    vi.mocked(getNextVersionNumber).mockResolvedValue(2)
+    vi.mocked(insertVersion).mockResolvedValue({ id: 2, version: 2 })
+    // Graphiti unavailable — conflict check deferred
+    vi.mocked(detectConflict).mockResolvedValue({ graphiti_unavailable: true, conflict: false })
+
+    const { handler } = await import('../../src/tools/remember.js')
+
+    // Must not throw "buildVersionRecord: projectId is required"
+    await expect(
+      handler(mockPg, {
+        topic: 'infra',
+        key: 'retry-strategy',
+        content: 'Exponential backoff, max 3 retries',
+        confidence: 0.8,
+        reason: 'Updated backoff policy after incident review',
+      }, humanIdentity, testCtx),
+    ).resolves.toMatchObject({
+      knowledge_status: 'PENDING_CONFLICT_CHECK',
+    })
+  })
+
+  it('PENDING_CONFLICT_CHECK result carries topic, key, version, and warning', async () => {
+    const { getCurrentVersion, getNextVersionNumber, insertVersion } = await import('../../src/graph/queries.js')
+    const { detectConflict } = await import('../../src/governance/conflict.js')
+
+    vi.mocked(getCurrentVersion).mockResolvedValue(existingVersion)
+    vi.mocked(getNextVersionNumber).mockResolvedValue(2)
+    vi.mocked(insertVersion).mockResolvedValue({ id: 2, version: 2 })
+    vi.mocked(detectConflict).mockResolvedValue({ graphiti_unavailable: true, conflict: false })
+
+    const { handler } = await import('../../src/tools/remember.js')
+
+    const result = await handler(mockPg, {
+      topic: 'infra',
+      key: 'retry-strategy',
+      content: 'Exponential backoff, max 3 retries',
+      confidence: 0.8,
+      reason: 'Updated backoff policy after incident review',
+    }, humanIdentity, testCtx)
+
+    expect(result).toMatchObject({
+      topic: 'infra',
+      key: 'retry-strategy',
+      knowledge_status: 'PENDING_CONFLICT_CHECK',
+    })
+    expect(result.warning).toMatch(/deferred|unavailable/i)
+  })
+})
