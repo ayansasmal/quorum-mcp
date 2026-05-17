@@ -3,7 +3,7 @@
 **Governed engineering memory for Claude Code and AI agents.**
 
 [![npm](https://img.shields.io/npm/v/@as-quorum/mcp?label=%40as-quorum%2Fmcp&color=cb0000&logo=npm)](https://www.npmjs.com/package/@as-quorum/mcp)
-[![Tests](https://img.shields.io/badge/tests-541%20passing-brightgreen?logo=vitest&logoColor=white)](https://github.com/ayansasmal/quorum-mcp)
+[![Tests](https://img.shields.io/badge/tests-559%20passing-brightgreen?logo=vitest&logoColor=white)](https://github.com/ayansasmal/quorum-mcp)
 [![Coverage — Lines](https://img.shields.io/badge/lines-86%25-brightgreen)](https://github.com/ayansasmal/quorum-mcp)
 [![Coverage — Branches](https://img.shields.io/badge/branches-79%25-brightgreen)](https://github.com/ayansasmal/quorum-mcp)
 [![Node](https://img.shields.io/badge/node-%3E%3D22-brightgreen?logo=nodedotjs&logoColor=white)](https://nodejs.org)
@@ -31,7 +31,7 @@ Claude Code / AI Agents
                                 FalkorDB
 ```
 
-The MCP server exposes 10 tools to Claude Code. All persistence goes through the Quorum gateway over HTTP — this package never touches a database directly.
+The MCP server exposes 12 tools to Claude Code. All persistence goes through the Quorum gateway over HTTP — this package never touches a database directly.
 
 **Identity model (v0.3):** the JWT carries only `{ sub, is_admin }`. The active project is sent as the `X-Quorum-Project` header on every request. `resolveCtx()` resolves this from the `.quorum` file in the project root and threads it through all tool calls.
 
@@ -176,7 +176,7 @@ npm install
 npm run build:all    # compile server + CLI → dist/
 npm run setup        # install skill, hooks, MCP (alias for: quorum install)
 npm run dev          # node --watch src/server.js (no build step needed for MCP server)
-npm test             # run all tests (35 files, 541 tests)
+npm test             # run all tests (36 files, 559 tests)
 npm test -- --coverage  # coverage report (lines 86%, branches 79%, functions 84%)
 ```
 
@@ -192,7 +192,7 @@ npm test -- --coverage  # coverage report (lines 86%, branches 79%, functions 84
 | Branches | **79%** | 75% |
 | Functions | **84%** | 75% |
 
-Test files: **35** · Tests: **541 passing**
+Test files: **36** · Tests: **559 passing**
 
 Coverage provider: v8 · Excluded from coverage pool: `server.js`, `quorum-file.js`, `prompts/loader.js`, `install/postinstall.js`, `config/loader.js` (S3/file I/O), `config/migrations.js` (DB schema migrations).
 
@@ -209,6 +209,8 @@ Coverage provider: v8 · Excluded from coverage pool: `server.js`, `quorum-file.
 | Claude writes → DRAFT | `src/tools/remember.js` — `storeFirst()` checks identity |
 | `triggered_by` always set | Schema enforcement — null value rejected |
 | Content in PostgreSQL | `src/governance/provenance.js` — `buildVersionRecord()` writes `summary: params.content` |
+| Agent identity before writes | `src/server.js` Gate 3 — `set_agent_context()` required before `remember`/`reflect`/`forget`/`review` |
+| `author_type` always `'agent'` | `src/tools/set-agent-context.js` — never accepted from caller input |
 
 ---
 
