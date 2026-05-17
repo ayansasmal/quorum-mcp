@@ -52,6 +52,8 @@ Store or update a knowledge node. Always creates a new version — never edits i
 
 **Do not pass `author`** — injected server-side from identity (GitHub token → git email → `QUORUM_AUTHOR`).
 
+**Dual-store write:** writes to PostgreSQL (`knowledge_versions`) AND Graphiti/FalkorDB. If Graphiti is unavailable during conflict detection, the entry is stored as `PENDING_CONFLICT_CHECK` (graceful). If Graphiti fails during the episode write itself, the entire pipeline fails with `FAILED_OUTCOME` audit — these two downtime paths are asymmetric.
+
 **Returns:**
 ```json
 { "status": "stored", "version": 1, "topic": "auth", "key": "token-strategy" }
@@ -95,14 +97,17 @@ Semantic + BM25 + graph traversal search across all ACTIVE knowledge.
 
 **Returns:** ranked results with author, confidence, version, and topic:key for each hit.
 
-Frequent recall of an entry signals trust in that author's domain knowledge — the
-authority formula rewards knowledge that gets used.
+**Search strategy:** runs Graphiti semantic search (vector + BM25) for the project namespace and global namespace in parallel. If Graphiti returns zero results, falls back to PostgreSQL ILIKE on the `summary` column — results tagged `source: postgres-fallback`. The fallback is keyword-only with no semantic similarity.
+
+Frequent recall of an entry signals trust in that author's domain knowledge — the authority formula rewards knowledge that gets used.
 
 ---
 
 ## `pending(topic?)`
 
 Returns all unresolved conflicts and DRAFT entries awaiting review.
+
+**Read with side-effect:** stale conflict detection runs on every call. If the underlying entry has been updated since a conflict was raised, `pending()` marks that conflict as `stale` in `pending_decisions` automatically. This mutation is intentional — it keeps the conflict list accurate — but means `pending()` is not a pure read.
 
 **Parameters:**
 - `topic` — optional filter
@@ -147,6 +152,10 @@ knowledge authored by a different identity (e.g. a different `QUORUM_AUTHOR`). A
 reviews must be surfaced to the human. Claude relays the human's decision via `review()`;
 it does not make the approval call itself.
 
+**Search visibility after approval:** approving a DRAFT updates PostgreSQL only. The Graphiti
+semantic search index is not immediately updated — `recall(topic, key)` works instantly but
+`search(query)` may not surface the entry until Graphiti is re-synced.
+
 ---
 
 ## `reflect(task_summary, options?)`
@@ -161,12 +170,12 @@ abandoned tasks.
 - `options.constraints` — array of constraints discovered during the task
 
 **Behaviour:**
-- Extracts individual learnable entries via LLM
-- Deduplicates against existing DRAFT entries via content hash
-- Calls `remember()` for each novel entry
+- LLM extraction runs on the gateway (`POST /governance/extract` → OpenAI) — Claude Code does not make the LLM call directly
+- Deduplicates against existing DRAFT entries via SHA-256 content hash — not semantic similarity
+- Calls `remember()` internally for each novel entry — these calls bypass Gate re-checking (already passed Gate 3)
 - All entries enter as `DRAFT` with `triggered_by: reflect`
+- Each stored entry produces its own independent INTENT+OUTCOME audit pair — a 3-item `reflect` produces ~8 audit entries total
 - Returns list of stored, skipped, and any conflicts detected
-- Fires webhook notification if `notifications.webhook_url` is configured
 
 ---
 
@@ -177,6 +186,8 @@ audit entry references.
 
 Use before superseding existing knowledge to understand why prior versions were written.
 
+**Degraded mode:** If Graphiti is unavailable, history still returns the full PostgreSQL version chain — all entries show `graph_linked: false`. No warning is surfaced; the data is still accurate (PostgreSQL is authoritative).
+
 ---
 
 ## `forget(topic, key, reason)`
@@ -185,6 +196,8 @@ Deprecate knowledge permanently. Never hard-deletes — creates a `DEPRECATED` m
 version. Requires `reason` (≥10 meaningful characters).
 
 Use when knowledge is definitively obsolete, not just superseded by a newer entry.
+
+**Two-row pattern:** creates a new DEPRECATED version row (reason + author recorded) AND transitions the old ACTIVE row to DEPRECATED. Both rows share `status = DEPRECATED` — this is correct; do not interpret it as duplicate data.
 
 **Always require explicit human confirmation before calling `forget()`.** Say:
 *"I think `topic:key` is obsolete because [reason]. Should I deprecate it?"*
@@ -200,6 +213,8 @@ Export knowledge to human-readable format.
 **Parameters:**
 - `format` — `"markdown" | "confluence"`
 - `topic` — optional; omit for full export across all domains
+
+**FalkorDB wipe caveat:** content is fetched from Graphiti via search, not a direct episode GET. After a FalkorDB wipe, content retrieval silently falls back to a placeholder — the exported document will contain `[Content stored in graph — search for this key to retrieve]` rows with no warning. Use `recall(topic, key)` after a wipe to verify content is preserved in PostgreSQL.
 
 ---
 
@@ -220,6 +235,8 @@ MCP server** — the gateway issues a scoped ES256 JWT (Gateway-MCP Token) which
 is stored in-memory. The browser shows "Quorum authenticated" and the flow returns.
 
 **Do not ask the engineer for a GitHub token.** The browser handles it entirely.
+
+**Gate exemptions:** `authenticate` bypasses both Gate 1 (project context) and Gate 2 (JWT check) — it must be callable before either exists. Gate 3 does not apply (not a write tool). Backed on the gateway by `mcp-oauth.js` (RFC8414 discovery, RFC7591 dynamic client registration, PKCE S256).
 
 **Trigger:** Auth runs automatically on first tool use. Call explicitly only to
 switch projects or after a `jwt_expired` / `401` response.
@@ -249,9 +266,9 @@ Upload a project config to the Quorum Gateway. Uses the JWT already stored by
 **Parameters:**
 - `options.config_path` — path to `<group_id>.quorum.json` file (required)
 
-**Gate exemption:** This tool bypasses the `no_project_context` gate — it runs before
-the `.quorum` file exists (that's Phase 5). Auth (Gate 2) still applies — call
-`authenticate()` first.
+**Gate exemptions:** Gate 1 (`no_project_context`) bypassed — config upload runs before the `.quorum` file exists (Phase 4 of onboarding). Gate 2 (JWT auth) still applies — call `authenticate()` first. Gate 3 does not apply (not a write tool).
+
+**Bootstrap self-authorization:** if the uploaded config lists the caller's GitHub username with role `principal_architect`, the gateway accepts the upload without a pre-existing project entry. This is the bootstrap path for brand new project onboarding — no other admin needs to add you first.
 
 **Use during onboarding Phase 4 only.** For config updates after onboarding, use the
 dashboard Config editor or `POST /sync/configs`.
