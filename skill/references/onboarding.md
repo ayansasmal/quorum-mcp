@@ -219,6 +219,13 @@ Expected: SKILL.md and 5 hook scripts present. If missing, re-run `quorum instal
 This is the highest-value step. CLAUDE.md, MEMORY.md, and session transcripts contain
 institutional knowledge that should be governed — not just living in flat files.
 
+**Before writing anything, call `set_agent_context` first** (Gate 3 blocks all write
+tools until this is done):
+
+```javascript
+set_agent_context({ agent_id: "claude-code-onboarding" })
+```
+
 **8a — CLAUDE.md**
 
 ```bash

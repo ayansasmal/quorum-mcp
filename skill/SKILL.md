@@ -534,6 +534,7 @@ Violations are **rejected**, not warned:
 ```
 # Session start (always)
 ls .quorum                                       ← verify project is connected
+set_agent_context({ agent_id: "claude-code" })   ← required before any writes (Gate 3)
 pending()                                        ← conflicts block; drafts note-only
 search("task domain")                            ← load context before touching code
 
