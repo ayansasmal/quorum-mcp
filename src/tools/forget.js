@@ -81,6 +81,9 @@ export async function handler(pg, input, identity, ctx) {
         supersedesReason: input.reason,
         status: KnowledgeStatus.DEPRECATED,
         projectId,
+        agentId:    ctx?.agentId    ?? null,
+        sessionId:  ctx?.sessionId  ?? null,
+        authorType: ctx?.authorType ?? 'agent',
       })
 
       await insertVersion(pg, versionRecord)

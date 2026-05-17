@@ -98,7 +98,7 @@ export async function handler(pg, input, identity, ctx) {
 
   // ── Resolve a pending conflict ──────────────────────────────────────────────
   if (input.conflict_id && input.resolution) {
-    return resolveConflictDecision(pg, input, identity, author, confidence, tags, triggeredBy, projectId)
+    return resolveConflictDecision(pg, input, identity, author, confidence, tags, triggeredBy, projectId, ctx)
   }
 
   const pipelineResult = await withAuditPipeline(
@@ -122,7 +122,7 @@ export async function handler(pg, input, identity, ctx) {
 
         // GAP-03: Graphiti was unavailable — store as PENDING_CONFLICT_CHECK for deferred re-check
         if (conflictResult.graphiti_unavailable) {
-          return storePendingConflictCheck(pg, input, author, confidence, tags, triggeredBy, identity?.role, projectId)
+          return storePendingConflictCheck(pg, input, author, confidence, tags, triggeredBy, identity?.role, projectId, ctx)
         }
 
         if (conflictResult.conflict) {
@@ -180,11 +180,11 @@ export async function handler(pg, input, identity, ctx) {
           // auto_supersede falls through to the supersession logic below
         }
 
-        return supersede(pg, input, existing, author, confidence, tags, triggeredBy, identity?.role, projectId)
+        return supersede(pg, input, existing, author, confidence, tags, triggeredBy, identity?.role, projectId, ctx)
       }
 
       // ── First version ───────────────────────────────────────────────────────
-      return storeFirst(pg, input, author, confidence, tags, triggeredBy, identity?.role, projectId)
+      return storeFirst(pg, input, author, confidence, tags, triggeredBy, identity?.role, projectId, ctx)
     },
   )
 
@@ -206,8 +206,9 @@ export async function handler(pg, input, identity, ctx) {
  * @param {string} triggeredBy
  * @param {string} [authorRole]
  * @param {string} [projectId='default']
+ * @param {{ agentId?: string, sessionId?: string, authorType?: string } | null} [ctx]
  */
-async function supersede(pg, input, existing, author, confidence, tags, triggeredBy, authorRole, projectId) {
+async function supersede(pg, input, existing, author, confidence, tags, triggeredBy, authorRole, projectId, ctx) {
   if (!projectId) throw new Error('supersede: projectId is required')
   const isGlobal = projectId === GLOBAL_PROJECT_ID
   const nextVersion = await getNextVersionNumber(pg, input.topic, input.key, projectId)
@@ -240,6 +241,9 @@ async function supersede(pg, input, existing, author, confidence, tags, triggere
     supersedesReason: input.reason,
     status: newStatus,
     projectId,
+    agentId:    ctx?.agentId    ?? null,
+    sessionId:  ctx?.sessionId  ?? null,
+    authorType: ctx?.authorType ?? 'agent',
   })
 
   // For non-global: atomically supersede in a single transaction via the
@@ -306,8 +310,9 @@ async function supersede(pg, input, existing, author, confidence, tags, triggere
  * @param {string} triggeredBy
  * @param {string} [authorRole]
  * @param {string} [projectId='default']
+ * @param {{ agentId?: string, sessionId?: string, authorType?: string } | null} [ctx]
  */
-async function storeFirst(pg, input, author, confidence, tags, triggeredBy, authorRole, projectId) {
+async function storeFirst(pg, input, author, confidence, tags, triggeredBy, authorRole, projectId, ctx) {
   if (!projectId) throw new Error('storeFirst: projectId is required')
   const isGlobal = projectId === GLOBAL_PROJECT_ID
 
@@ -341,6 +346,9 @@ async function storeFirst(pg, input, author, confidence, tags, triggeredBy, auth
     graphitiEpisodeId: graphitiResult.episode_id,
     status,
     projectId,
+    agentId:    ctx?.agentId    ?? null,
+    sessionId:  ctx?.sessionId  ?? null,
+    authorType: ctx?.authorType ?? 'agent',
   })
 
   const inserted = await insertVersion(pg, { ...versionRecord, tags })
@@ -376,8 +384,9 @@ async function storeFirst(pg, input, author, confidence, tags, triggeredBy, auth
  * @param {string} triggeredBy
  * @param {string} [authorRole]
  * @param {string} [projectId='default']
+ * @param {{ agentId?: string, sessionId?: string, authorType?: string } | null} [ctx]
  */
-async function storePendingConflictCheck(pg, input, author, confidence, tags, triggeredBy, authorRole, projectId) {
+async function storePendingConflictCheck(pg, input, author, confidence, tags, triggeredBy, authorRole, projectId, ctx) {
   if (!projectId) throw new Error('storePendingConflictCheck: projectId is required')
   const existing = await getCurrentVersion(pg, input.topic, input.key, projectId)
   const version = existing ? (existing.version + 1) : 1
@@ -398,6 +407,9 @@ async function storePendingConflictCheck(pg, input, author, confidence, tags, tr
     supersedes_version: existing?.version ?? null,
     supersedes_reason: input.reason ?? null,
     projectId,
+    agentId:    ctx?.agentId    ?? null,
+    sessionId:  ctx?.sessionId  ?? null,
+    authorType: ctx?.authorType ?? 'agent',
   })
 
   const inserted = await insertVersion(pg, { ...versionRecord, tags, project_id: projectId })
@@ -441,7 +453,7 @@ async function storePendingConflictCheck(pg, input, author, confidence, tags, tr
  * @param {string[]} tags
  * @param {string} triggeredBy
  */
-async function resolveConflictDecision(pg, input, identity, author, confidence, tags, triggeredBy, projectId) {
+async function resolveConflictDecision(pg, input, identity, author, confidence, tags, triggeredBy, projectId, ctx) {
   if (!projectId) throw new Error('resolveConflictDecision: projectId is required')
   enforceReasonRequired(input.reason, `conflict resolution (${input.resolution})`)
 
@@ -473,7 +485,7 @@ async function resolveConflictDecision(pg, input, identity, author, confidence, 
 
   if (input.resolution === 'supersede') {
     if (!existing) return { status: 'error', message: `No ACTIVE version found for ${topic}:${key}` }
-    const result = await supersede(pg, { ...input, topic, key, reason: input.reason }, existing, author, confidence, tags, TriggeredBy.CONFLICT_RESOLUTION, identity?.role, projectId)
+    const result = await supersede(pg, { ...input, topic, key, reason: input.reason }, existing, author, confidence, tags, TriggeredBy.CONFLICT_RESOLUTION, identity?.role, projectId, ctx)
     await closeConflict(pg, input.conflict_id, 'supersede', input.reason, author, null, null, null, projectId)
     return { ...result.result, conflict_id: input.conflict_id }
   }
@@ -496,6 +508,9 @@ async function resolveConflictDecision(pg, input, identity, author, confidence, 
       triggeredBy: TriggeredBy.CONFLICT_RESOLUTION, auditEntryId: 'pre_pending',
       graphitiEpisodeId: episodeA.episode_id,
       projectId,
+      agentId:    ctx?.agentId    ?? null,
+      sessionId:  ctx?.sessionId  ?? null,
+      authorType: ctx?.authorType ?? 'agent',
     })
     await insertVersion(pg, { ...recordA, tags: normalizeTags([...tags, key]) })
 
@@ -512,6 +527,9 @@ async function resolveConflictDecision(pg, input, identity, author, confidence, 
       triggeredBy: TriggeredBy.CONFLICT_RESOLUTION, auditEntryId: 'pre_pending',
       graphitiEpisodeId: episodeB.episode_id,
       projectId,
+      agentId:    ctx?.agentId    ?? null,
+      sessionId:  ctx?.sessionId  ?? null,
+      authorType: ctx?.authorType ?? 'agent',
     })
     await insertVersion(pg, { ...recordB, tags: normalizeTags([...tags, key]) })
 
@@ -545,7 +563,7 @@ async function resolveConflictDecision(pg, input, identity, author, confidence, 
     const mergeResult = await supersede(
       pg,
       { ...input, topic, key, content: input.merged_content, reason: input.reason },
-      existing, author, confidence, tags, TriggeredBy.CONFLICT_RESOLUTION, identity?.role, projectId,
+      existing, author, confidence, tags, TriggeredBy.CONFLICT_RESOLUTION, identity?.role, projectId, ctx,
     )
 
     await closeConflict(pg, input.conflict_id, 'coexist_merge', input.reason, author, null, null,

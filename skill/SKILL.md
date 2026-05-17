@@ -26,7 +26,25 @@ authority weighting, and a tamper-evident audit trail.
 
 ## Session Start (always, without being asked)
 
-### Step 0 — Is this project connected to Quorum?
+### Step 0 — Register agent identity (required before any writes)
+
+Before calling remember(), reflect(), forget(), or review(), register this agent session:
+
+```
+set_agent_context({ agent_id: "your-name" })
+```
+
+Naming convention:
+- Main Claude Code session: `claude-code` or `claude-code-<task-slug>`
+- Subagent: `subagent-<specialty>` (e.g. `subagent-auth`, `subagent-db-optimizer`)
+
+Rules: kebab-case only, starts with a letter, max 40 chars.
+
+Write tools return `agent_context_required` until this is called. Read tools (recall, search, pending, history) do not require it.
+
+---
+
+### Step 1 — Is this project connected to Quorum?
 
 ```bash
 ls .quorum 2>/dev/null
@@ -40,7 +58,7 @@ ls .quorum 2>/dev/null
 
 ---
 
-### Step 1 — Surface pending items
+### Step 2 — Surface pending items
 
 ```
 pending()    ← returns conflict_briefs and draft_reviews — handle them differently
@@ -53,7 +71,7 @@ pending()    ← returns conflict_briefs and draft_reviews — handle them diffe
 
 ---
 
-### Step 2 — Load relevant context
+### Step 3 — Load relevant context
 
 Read the task and infer all domains involved. Pull knowledge for each upfront:
 

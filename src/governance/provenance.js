@@ -36,6 +36,9 @@ export function hashContent(content) {
  *   supersedesReason?: string,
  *   conflictId?: string,
  *   status?: string,
+ *   agentId?: string,
+ *   sessionId?: string,
+ *   authorType?: string,
  * }} params
  * @returns {Record<string, unknown>}
  */
@@ -59,6 +62,9 @@ export function buildVersionRecord(params) {
     conflict_id: params.conflictId ?? null,
     graphiti_episode_id: params.graphitiEpisodeId ?? null,
     project_id: params.projectId,
+    agent_id:    params.agentId    ?? null,
+    session_id:  params.sessionId  ?? null,
+    author_type: params.authorType ?? 'agent',
     // Backward link — set at creation time
     supersedes_version: params.supersedesVersion ?? null,
     supersedes_reason: params.supersedesReason ?? null,

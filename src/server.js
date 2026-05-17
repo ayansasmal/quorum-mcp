@@ -34,6 +34,8 @@ import { loadConfig, stopConfigPoller } from './config/loader.js';
 import { resolveIdentity } from './identity/resolver.js';
 import { getGatewayClient, isAuthenticated } from './gateway/client.js';
 import * as authenticate from './tools/authenticate.js';
+import * as setAgentContext from './tools/set-agent-context.js';
+import { getAgentCtx } from './tools/set-agent-context.js';
 
 import * as remember from './tools/remember.js';
 import * as recall from './tools/recall.js';
@@ -65,6 +67,7 @@ const server = new McpServer({
 });
 
 const tools = [
+  { name: 'set_agent_context', def: setAgentContext },
   { name: 'authenticate', def: authenticate },
   { name: 'config_upload', def: configUpload },
   { name: 'search', def: search },
@@ -202,11 +205,35 @@ export function registerTools() {
           };
         }
 
+        // Gate 3: write tools require agent context to be set first
+        const WRITE_TOOLS = new Set(['remember', 'reflect', 'forget', 'review'])
+        if (WRITE_TOOLS.has(name) && !getAgentCtx()) {
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                error: 'agent_context_required',
+                message: 'Call set_agent_context({ agent_id }) before writing to Quorum.',
+                hint: 'set_agent_context identifies this agent session for audit and governance. Use a descriptive kebab-case name (e.g. "claude-code", "subagent-auth-fix").',
+              }),
+            }],
+            isError: true,
+          }
+        }
+
         // Resolve gateway client from ctx URL (or env fallback inside getGatewayClient)
         const activePool = getGatewayClient(ctx?.gatewayUrl);
 
         // Inject project scope — v0.3: project travels as X-Quorum-Project header, not JWT claim
         if (activePool?.setProjectId) activePool.setProjectId(ctx?.projectId ?? null)
+
+        // Merge agent context into ctx for write tools
+        const agentCtx = getAgentCtx()
+        if (ctx && agentCtx) {
+          ctx.agentId    = agentCtx.agent_id
+          ctx.sessionId  = agentCtx.session_id
+          ctx.authorType = agentCtx.author_type
+        }
 
         // Resolve identity fresh on every call — captures live role from the
         // gateway profile cache so role changes in DDB/Redis take effect

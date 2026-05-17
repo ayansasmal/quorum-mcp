@@ -102,6 +102,11 @@ const recordHandler = () => ({
     return { identity }
   },
 })
+vi.mock('../../src/tools/set-agent-context.js', () => ({
+  schema: { shape: {} },
+  handler: async () => ({ status: 'context_set' }),
+  getAgentCtx: () => ({ agent_id: 'test-agent', session_id: 'sess_00000000', author_type: 'agent' }),
+}))
 vi.mock('../../src/tools/authenticate.js',  () => ({ schema: { shape: {} }, handler: async (_p, _i, identity) => { (globalThis.__handlerCalls ??= []).push({ identity }); return { identity } } }))
 vi.mock('../../src/tools/config-upload.js', () => ({ schema: { shape: {} }, handler: async (_p, _i, identity) => { (globalThis.__handlerCalls ??= []).push({ identity }); return { identity } } }))
 vi.mock('../../src/tools/search.js',        () => ({ schema: { shape: {} }, handler: async (_p, _i, identity) => { (globalThis.__handlerCalls ??= []).push({ identity }); return { identity } } }))
