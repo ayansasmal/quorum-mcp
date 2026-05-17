@@ -2,6 +2,15 @@
 
 **Governed engineering memory for Claude Code and AI agents.**
 
+[![npm](https://img.shields.io/npm/v/@as-quorum/mcp?label=%40as-quorum%2Fmcp&color=cb0000&logo=npm)](https://www.npmjs.com/package/@as-quorum/mcp)
+[![Tests](https://img.shields.io/badge/tests-541%20passing-brightgreen?logo=vitest&logoColor=white)](https://github.com/ayansasmal/quorum-mcp)
+[![Coverage — Lines](https://img.shields.io/badge/lines-86%25-brightgreen)](https://github.com/ayansasmal/quorum-mcp)
+[![Coverage — Branches](https://img.shields.io/badge/branches-79%25-brightgreen)](https://github.com/ayansasmal/quorum-mcp)
+[![Node](https://img.shields.io/badge/node-%3E%3D22-brightgreen?logo=nodedotjs&logoColor=white)](https://nodejs.org)
+[![MCP](https://img.shields.io/badge/MCP-compatible-blueviolet?logo=anthropic)](https://modelcontextprotocol.io)
+[![Gateway](https://img.shields.io/badge/requires-Quorum%20Gateway-orange)](https://github.com/ayansasmal/quorum)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
+
 `quorum-mcp` is the MCP server package for [Quorum](https://github.com/ayansasmal/quorum) — a temporal knowledge graph that gives Claude Code and multi-agent systems a shared, self-evolving memory of engineering decisions, patterns, and institutional knowledge. It enforces governance: conflict detection, authority weighting, human-in-the-loop approval, and a tamper-evident audit trail.
 
 > **Requires a running Quorum gateway.** This package is the client side only. The gateway + dashboard live in the [`quorum`](https://github.com/ayansasmal/quorum) repo.
@@ -16,9 +25,9 @@ Claude Code / AI Agents
         ▼
   quorum-mcp  ──── HTTP ────►  Quorum Gateway (:3001)
                Bearer JWT              │
-               X-Quorum-Project    ┌───┴────────┐
-                                Graphiti   PostgreSQL
-                                   │
+               X-Quorum-Project    ┌───┴────────────────┐
+                                Graphiti          PostgreSQL
+                                   │              (audit chain)
                                 FalkorDB
 ```
 
@@ -26,12 +35,14 @@ The MCP server exposes 10 tools to Claude Code. All persistence goes through the
 
 **Identity model (v0.3):** the JWT carries only `{ sub, is_admin }`. The active project is sent as the `X-Quorum-Project` header on every request. `resolveCtx()` resolves this from the `.quorum` file in the project root and threads it through all tool calls.
 
+**Dual-store audit pipeline:** every tool call writes INTENT + OUTCOME entries to PostgreSQL (durable, SHA256 tamper-evident chain) and Graphiti (semantic traversal). If Graphiti is unavailable, writes are stored as `PENDING_CONFLICT_CHECK` in PostgreSQL for later reprocessing.
+
 ---
 
 ## Prerequisites
 
 1. A running Quorum gateway — see the [`quorum`](https://github.com/ayansasmal/quorum) repo for setup
-2. Node.js ≥ 20
+2. Node.js ≥ 22
 3. Claude Code CLI (`claude`)
 
 ---
@@ -131,11 +142,12 @@ src/
                         history · export · forget · review · pending · authenticate
                         config_upload)
   governance/         — conflict.js · authority.js · confidence.js · constitutional.js
-                        provenance.js (buildVersionRecord — PG summary column write)
+                        provenance.js (buildVersionRecord — writes to PG summary column)
   audit/              — pipeline.js · chain.js · primary.js · secondary.js
-  graph/              — client.js (Graphiti — group_ids omitted from search calls)
+  graph/              — client.js (Graphiti — BLOCKED_METHODS enforced)
                         schema.js · queries.js
   identity/           — resolver.js (4-layer: JWT sub → QUORUM_AUTHOR → git email → anonymous)
+  config/             — loader.js · migrations.js · schema.js
   gateway/
     client.js         — HTTP client: Bearer JWT + X-Quorum-Project header on every request
   install/
@@ -149,7 +161,10 @@ tests/
   constitutional/     — Layer 1: invariant tests (100% coverage required)
   governance/         — Layer 2: conflict detection, authority, confidence
   tools/              — Per-tool handler tests (remember · recall · reflect · ...)
-  gateway-client.test.js — X-Quorum-Project header threading tests
+  audit/              — pipeline.test.js · secondary.test.js
+  graph/              — queries.test.js
+  identity/           — resolver.test.js
+  gateway/            — gateway-client.test.js · gateway-client-extended.test.js
 ```
 
 ---
@@ -161,8 +176,25 @@ npm install
 npm run build:all    # compile server + CLI → dist/
 npm run setup        # install skill, hooks, MCP (alias for: quorum install)
 npm run dev          # node --watch src/server.js (no build step needed for MCP server)
-npm test             # constitutional + governance + tool tests
+npm test             # run all tests (35 files, 541 tests)
+npm test -- --coverage  # coverage report (lines 86%, branches 79%, functions 84%)
 ```
+
+> **Important:** the MCP server runs from `dist/server.js` (esbuild bundle). Source edits require `npm run build:all` before changes take effect in Claude Code.
+
+---
+
+## Test coverage
+
+| Metric | Coverage | Threshold |
+|--------|----------|-----------|
+| Lines | **86%** | 75% |
+| Branches | **79%** | 75% |
+| Functions | **84%** | 75% |
+
+Test files: **35** · Tests: **541 passing**
+
+Coverage provider: v8 · Excluded from coverage pool: `server.js`, `quorum-file.js`, `prompts/loader.js`, `install/postinstall.js`, `config/loader.js` (S3/file I/O), `config/migrations.js` (DB schema migrations).
 
 ---
 
@@ -172,17 +204,21 @@ npm test             # constitutional + governance + tool tests
 |------|---------------|
 | No hard delete | `src/graph/client.js` — `BLOCKED_METHODS` list |
 | Audit append-only | `src/audit/secondary.js` — `updateEntry`/`deleteEntry` always throw |
-| Reason ≥ 10 chars | `src/governance/constitutional.js` — `enforceReason()` |
+| Reason ≥ 10 chars | `src/governance/constitutional.js` — `enforceReasonRequired()` |
 | No self-approval | `src/governance/constitutional.js` — `enforceNoSelfApproval()` |
-| Claude writes → DRAFT | `src/tools/remember.js` — `storeFirst()` checks identity.name |
+| Claude writes → DRAFT | `src/tools/remember.js` — `storeFirst()` checks identity |
 | `triggered_by` always set | Schema enforcement — null value rejected |
 | Content in PostgreSQL | `src/governance/provenance.js` — `buildVersionRecord()` writes `summary: params.content` |
 
 ---
 
-## Backlog
+## v0.3 bug fixes
 
-See [docs/BACKLOG.md](docs/BACKLOG.md) for open items.
+| Bug | Description | Fix |
+|-----|-------------|-----|
+| **D** | `recall()` read `version.content` — always undefined; PostgreSQL stores content in `summary` column | `version.summary ?? version.content` |
+| **E** | `storePendingConflictCheck` passed `project_id` (snake_case) to `buildVersionRecord` which expects `projectId` (camelCase) — always threw | renamed to `projectId` |
+| **F** | `primary.writeEntry()` embedded `groupId` inside the metadata object instead of as the third positional arg to `addEpisode(content, metadata, groupId)` — every audit write failed silently | moved to third positional arg |
 
 ---
 
