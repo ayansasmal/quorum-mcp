@@ -1,6 +1,33 @@
 # Quorum Tool Reference
 
-Full parameter schemas, return shapes, and edge cases for all 11 MCP tools.
+Full parameter schemas, return shapes, and edge cases for all 12 MCP tools.
+
+---
+
+## `set_agent_context(agent_id)`
+
+**Call this first — before any write tool.** Required gate: `remember`, `reflect`, `forget`, and `review`
+are all blocked until this is called. Call once per session (not per tool call).
+
+**Parameters:**
+- `agent_id` — kebab-case identifier for this agent (e.g. `claude-code`, `subagent-auth-fix`).
+  Must match `^[a-z][a-z0-9-]{0,39}$`. Max 40 characters.
+
+**Do not pass `session_id` or `author_type`** — both are derived server-side:
+- `session_id` is derived from `hash(PID + hrtime)` → `sess_` + 8 hex chars, uniquely scoping each MCP process lifetime
+- `author_type` is always `'agent'` (never caller-supplied); distinguishes MCP writes from future human dashboard writes
+
+**Returns:**
+```json
+{ "status": "context_set", "agent_id": "claude-code", "session_id": "sess_3f9a1b2c",
+  "author_type": "agent",
+  "note": "All writes in this session will be attributed to claude-code (sess_3f9a1b2c)." }
+```
+
+**Error if `agent_id` is invalid:**
+```json
+{ "error": "invalid_agent_id", "message": "agent_id must match ^[a-z][a-z0-9-]{0,39}$" }
+```
 
 ---
 

@@ -12,7 +12,7 @@ npx @as-quorum/mcp install
 
 ## Purpose
 
-MCP server that exposes 11 tools to Claude Code: `remember`, `recall`, `search`, `reflect`, `history`, `export`, `forget`, `review`, `pending`, `authenticate`, `config_upload`.
+MCP server that exposes 12 tools to Claude Code: `set_agent_context`, `remember`, `recall`, `search`, `reflect`, `history`, `export`, `forget`, `review`, `pending`, `authenticate`, `config_upload`.
 
 Always communicates with a Quorum gateway over HTTP. **Never connects to PostgreSQL directly.** Default gateway URL: `http://localhost:3001` (local dev Docker stack).
 
@@ -54,7 +54,7 @@ dist/                     — Compiled output (esbuild, gitignored)
 npm run build:all    # compile src/server.js + cli.js → dist/
 npm run dev          # node --watch src/server.js (uncompiled, for local dev)
 npm run start        # run compiled dist/server.js
-npm test             # run all tests (35 files, 541 tests)
+npm test             # run all tests (36 files, 559 tests)
 npm test -- --coverage  # with v8 coverage report (75% threshold: lines, branches, functions)
 npm run test:constitutional  # Layer 1 only (blocking CI gate)
 ```
@@ -68,6 +68,8 @@ npm run test:constitutional  # Layer 1 only (blocking CI gate)
 **GatewayClient** (`src/gateway/client.js`) is the only persistence interface the MCP uses. It implements typed methods — `getCurrentVersion()`, `insertVersion()`, `writeAuditEntry()`, etc. — that map to the gateway's `/pg/*` REST API. Every request carries a `Bearer` JWT and `X-Quorum-Project` header. Its `query()` method throws intentionally.
 
 **Identity:** Resolved once per session (from JWT in gateway mode). Never accepted as tool input — server-side only.
+
+**Agent identity (v0.3):** `set_agent_context({ agent_id })` is Gate 3 — must be called before any write tool (`remember`, `reflect`, `forget`, `review`). `agent_id` is validated as `^[a-z][a-z0-9-]{0,39}$`. `session_id` is derived server-side from `hash(PID + hrtime.bigint())` → `sess_` + 8 hex chars. `author_type` is always `'agent'` (never caller-supplied) — foundation for distinguishing human dashboard writes from agent MCP writes in future versions. All three fields are written to `knowledge_versions.agent_id`, `.session_id`, `.author_type` via `buildVersionRecord()`.
 
 **Skill + Hooks:** Install with `npx @as-quorum/mcp install`. Copies `skill/SKILL.md` to `~/.claude/skills/quorum/`, copies `hooks/quorum-*.sh` to `~/.claude/hooks/`, merges hook wiring into `~/.claude/settings.json`, and runs `claude mcp add`. Use `--skip-mcp`, `--skip-skill`, or `--skip-hooks` to skip individual steps. Hooks are self-limiting: each script checks `[ -f ".quorum" ] || exit 0` — silent in any project without a `.quorum` sentinel file.
 
@@ -84,3 +86,5 @@ npm run test:constitutional  # Layer 1 only (blocking CI gate)
 | Claude writes → DRAFT | `src/tools/remember.js` `storeFirst()` — `author === 'claude'` forces DRAFT |
 | `triggered_by` always set | Schema enforcement — null value rejected |
 | Content in PostgreSQL | `src/governance/provenance.js` `buildVersionRecord()` writes `summary: params.content` |
+| Agent identity before writes | `src/server.js` Gate 3 — `set_agent_context()` required before `remember`/`reflect`/`forget`/`review` |
+| `author_type` always `'agent'` | `src/tools/set-agent-context.js` — never accepted from caller input |
