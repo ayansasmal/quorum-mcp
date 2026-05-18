@@ -9,7 +9,7 @@
 [![Node](https://img.shields.io/badge/node-%3E%3D22-brightgreen?logo=nodedotjs&logoColor=white)](https://nodejs.org)
 [![MCP](https://img.shields.io/badge/MCP-compatible-blueviolet?logo=anthropic)](https://modelcontextprotocol.io)
 [![Gateway](https://img.shields.io/badge/requires-Quorum%20Gateway-orange)](https://github.com/ayansasmal/quorum)
-[![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
+[![License](https://img.shields.io/badge/license-ELv2-blue)](LICENSE)
 
 `quorum-mcp` is the MCP server package for [Quorum](https://github.com/ayansasmal/quorum) — a temporal knowledge graph that gives Claude Code and multi-agent systems a shared, self-evolving memory of engineering decisions, patterns, and institutional knowledge. It enforces governance: conflict detection, authority weighting, human-in-the-loop approval, and a tamper-evident audit trail.
 
@@ -60,7 +60,7 @@ quorum install
 - Wires hook entries into `~/.claude/settings.json`
 - Registers the MCP server at user scope via `claude mcp add --scope user`
 
-Set the gateway URL if it's not on `localhost:3001`:
+Set the gateway URL — **required** (there is no default):
 
 ```bash
 export QUORUM_GATEWAY_URL=https://quorum.your-org.internal
@@ -112,7 +112,7 @@ These limits are enforced at the Zod layer (MCP) and the gateway validation laye
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `QUORUM_GATEWAY_URL` | `http://localhost:3001` | URL of the Quorum gateway |
+| `QUORUM_GATEWAY_URL` | *(required — no default)* | URL of the Quorum gateway. Set in your shell or via `claude mcp add -e`. |
 | `QUORUM_AUTHOR` | git email | Identity override — useful in CI contexts |
 
 > **Authentication:** auth is automatic — every tool checks for a valid JWT and triggers the PKCE browser flow if missing. You do not need to call `authenticate()` manually. The JWT is stored in-memory only and cleared on MCP restart.
@@ -241,4 +241,4 @@ Coverage provider: v8 · Excluded from coverage pool: `server.js`, `quorum-file.
 
 ## License
 
-Apache-2.0
+Elastic License 2.0 — see [LICENSE](LICENSE). Self-hosting is permitted. You may not offer Quorum as a managed service or distribute modified copies.
