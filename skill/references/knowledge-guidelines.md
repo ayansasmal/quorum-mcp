@@ -45,6 +45,21 @@ Do NOT call `reflect()` for these session types:
 
 ---
 
+## Content Constraints (enforced by gateway and MCP)
+
+These are hard limits — the gateway rejects violations with a 400. Write concisely.
+
+| Field | Constraint |
+|-------|-----------|
+| `content` / `summary` | Max 500 chars, plain text, no HTML (`<` `>` forbidden) |
+| `topic` | Kebab-case slug, max 60 chars (`auth`, `db-layer`) |
+| `key` | Kebab-case slug, max 80 chars (`token-strategy`) |
+| `tags` | Max 10 tags, each kebab-case, max 40 chars |
+| `reason` | Min 10 chars, max 500 chars, plain text |
+| `confidence` | Float 0.5–1.0 |
+
+---
+
 ## Confidence guidelines
 
 | Role | Base confidence floor |
