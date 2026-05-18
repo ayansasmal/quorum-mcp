@@ -31,7 +31,7 @@ src/
   tools/                  — One file per MCP tool
   governance/             — conflict.js · authority.js · confidence.js · provenance.js
   audit/                  — pipeline.js · chain.js · primary.js · secondary.js
-  graph/                  — client.js (Graphiti) · schema.js · queries.js (pg-compat + GatewayClient duck-type)
+  graph/                  — client.js (Graphiti) · schema.js · queries.js (pg-compat + GatewayClient duck-type) · validate.js (shared input validation)
   config/                 — schema.js · loader.js · quorum.schema.json
   identity/               — resolver.js (4-layer identity chain)
   gateway/
@@ -64,6 +64,8 @@ npm run test:constitutional  # Layer 1 only (blocking CI gate)
 ## Architecture Constraints
 
 **Never add `pg` calls to new code.** The `pg` parameter on functions in `graph/queries.js` and `audit/secondary.js` is kept for backward-compat with gateway's workspace import — those functions duck-type: `if (typeof pg.methodName === 'function') return pg.methodName(...)` and fall through to raw SQL only when a real `pg.Pool` is passed (which only the gateway does).
+
+**Shared validation module:** `src/shared/graph/validate.js` is a vendored copy of `gateway/src/shared/graph/validate.js`. Contains `validateKnowledgeInput(fields, opts)` and `ValidationError`. Must be manually synced when the canonical (gateway) copy changes.
 
 **GatewayClient** (`src/gateway/client.js`) is the only persistence interface the MCP uses. It implements typed methods — `getCurrentVersion()`, `insertVersion()`, `writeAuditEntry()`, etc. — that map to the gateway's `/pg/*` REST API. Every request carries a `Bearer` JWT and `X-Quorum-Project` header. Its `query()` method throws intentionally.
 

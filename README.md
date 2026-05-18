@@ -93,6 +93,21 @@ quorum init        # creates .quorum file with project group_id
 
 ---
 
+### Content constraints (enforced by gateway and MCP)
+
+| Field | Constraint |
+|-------|-----------|
+| `content` | Max 500 chars, plain text — no `<` or `>` characters |
+| `topic` | Kebab-case slug, max 60 chars (e.g. `auth`, `db-layer`) |
+| `key` | Kebab-case slug, max 80 chars (e.g. `token-strategy`) |
+| `tags` | Max 10 tags, each kebab-case, max 40 chars |
+| `reason` | Min 10 chars, max 500 chars, plain text |
+| `confidence` | Float 0.5–1.0 |
+
+These limits are enforced at the Zod layer (MCP) and the gateway validation layer. Violations return a structured error before any network call.
+
+---
+
 ## Environment variables
 
 | Variable | Default | Description |

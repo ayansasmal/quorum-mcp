@@ -159,6 +159,8 @@ reversals — superseding blindly can undo months of governed decisions.
 
 ### You discover a new constraint
 
+> **Content constraints apply** — content must be ≤ 500 chars with no HTML (`<` `>` forbidden); topic and key must be kebab-case slugs; reason (for supersede/promote) must be ≥ 10 chars. See `references/knowledge-guidelines.md` § Content Constraints for the full table.
+
 Call `remember()` **immediately** — do not wait for the task to finish.
 Constraints discovered mid-task are the most valuable kind; they get lost otherwise.
 

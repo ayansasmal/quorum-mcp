@@ -36,14 +36,14 @@ are all blocked until this is called. Call once per session (not per tool call).
 Store or update a knowledge node. Always creates a new version — never edits in place.
 
 **Parameters:**
-- `topic` — domain namespace (`auth`, `api`, `db`, `infra`, `testing`, `payments`, `security`, ...)
-- `key` — unique identifier within topic (kebab-case, e.g. `token-strategy`)
-- `content` — the knowledge to store; include rationale, not just conclusions
-- `options.confidence` — `0.0–1.0` (role floor applied automatically; see knowledge-guidelines.md)
-- `options.tags` — string array for cross-domain searchability
+- `topic` — domain namespace (`auth`, `api`, `db`, `infra`, `testing`, `payments`, `security`, ...). Kebab-case slug (`/^[a-z0-9-]+$/`), max 60 chars.
+- `key` — unique identifier within topic (kebab-case, e.g. `token-strategy`). Kebab-case slug, max 80 chars.
+- `content` — the knowledge to store; include rationale, not just conclusions. Max 500 chars, plain text (no `<` or `>`).
+- `options.confidence` — Float 0.5–1.0 (role floor applied automatically; see knowledge-guidelines.md).
+- `options.tags` — string array for cross-domain searchability. Array, max 10 items. Each tag: kebab-case, max 40 chars.
 - `options.conflict_id` — from `pending()` response; required when resolving a pending conflict
 - `options.resolution` — `"supersede" | "coexist_split" | "coexist_merge" | "reject" | "escalate"`
-- `options.reason` — required when `resolution` is set (≥10 meaningful characters)
+- `options.reason` — required when `resolution` is set. Min 10 chars, max 500 chars, plain text.
 - `options.split_existing_key` — new key for the existing entry (required for `coexist_split`)
 - `options.split_incoming_key` — new key for the incoming entry (required for `coexist_split`)
 - `options.split_existing_content` — optional refined content for split A
@@ -165,9 +165,9 @@ abandoned tasks.
 
 **Parameters:**
 - `task_summary` — 1–3 sentences: what was done and why
-- `options.decisions` — array of decision strings with rationale
-- `options.patterns` — array of pattern strings
-- `options.constraints` — array of constraints discovered during the task
+- `options.decisions` — array of decision strings with rationale. Each item max 500 chars.
+- `options.patterns` — array of pattern strings. Each item max 500 chars.
+- `options.constraints` — array of constraints discovered during the task. Each item max 500 chars.
 
 **Behaviour:**
 - LLM extraction runs on the gateway (`POST /governance/extract` → OpenAI) — Claude Code does not make the LLM call directly
