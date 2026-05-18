@@ -3,7 +3,7 @@
   "version": "0.2.0",
   "description": "Quorum MCP server — governed engineering memory for Claude Code and AI agents",
   "type": "module",
-  "license": "Apache-2.0",
+  "license": "SEE LICENSE IN LICENSE",
   "engines": {
     "node": ">=22.12.0"
   },
