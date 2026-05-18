@@ -2,7 +2,7 @@
  * Quorum MCP Server entry point.
  *
  * Startup sequence:
- *   1. Set QUORUM_GATEWAY_URL default (http://localhost:3001)
+ *   1. Verify QUORUM_GATEWAY_URL is set (required — no default)
  *   2. Verify SHA256 audit chain integrity via gateway (non-fatal if not yet authenticated)
  *   3. Load S3 config (or local path / env fallback)
  *   4. Resolve caller identity (from JWT via gateway)
@@ -11,7 +11,7 @@
  *   7. Connect MCP stdio transport
  *
  * The MCP always communicates with a Quorum gateway over HTTP — never directly
- * to PostgreSQL or Graphiti. Default gateway: http://localhost:3001 (local dev).
+ * to PostgreSQL or Graphiti. QUORUM_GATEWAY_URL must be set explicitly.
  *
  * Identity is resolved fresh on every tool call — not captured at startup —
  * so role changes in DDB/Redis (propagated via the gateway profile cache) are
@@ -48,13 +48,17 @@ import * as exportTool from './tools/export.js';
 import * as pending from './tools/pending.js';
 import * as configUpload from './tools/config-upload.js';
 
-// ── Gateway URL default ────────────────────────────────────────────────────────
-// The MCP always communicates with a Quorum gateway over HTTP.
-// Engineers running the local Docker stack get http://localhost:3001 by default.
-// Enterprise teams set QUORUM_GATEWAY_URL to their central Quorum instance.
-// The .quorum project file may also set this before we reach this line.
-process.env.QUORUM_GATEWAY_URL ??= 'http://localhost:3001';
-console.error(`[Quorum] Gateway: ${process.env.QUORUM_GATEWAY_URL}`);
+// ── Gateway URL (required) ─────────────────────────────────────────────────────
+// QUORUM_GATEWAY_URL must be set — either via the .quorum project file,
+// QUORUM_GATEWAY_URL env var, or `claude mcp add -e QUORUM_GATEWAY_URL=...`.
+// No default is provided: a missing URL fails fast at tool-call time rather
+// than silently targeting the wrong gateway.
+if (!process.env.QUORUM_GATEWAY_URL) {
+  console.error('[Quorum] ⚠  QUORUM_GATEWAY_URL is not set — tools will fail until a gateway URL is configured.');
+  console.error('[Quorum]    Set it in your .quorum file or via: claude mcp add -e QUORUM_GATEWAY_URL=https://... quorum');
+} else {
+  console.error(`[Quorum] Gateway: ${process.env.QUORUM_GATEWAY_URL}`);
+}
 console.error(
   '[Quorum] ℹ  Not authenticated — call authenticate() to log in via GitHub OAuth',
 );
@@ -136,7 +140,7 @@ async function resolveCtx() {
   if (rawQProjectId || rawProjectId) {
     const projectId = rawQProjectId ?? rawProjectId.replace(/-/g, '_')
     log.debug('resolveCtx: resolved from env vars', { projectId, gatewayUrl })
-    return { projectId, groupId: rawProjectId ?? null, gatewayUrl: gatewayUrl ?? 'http://localhost:3001' }
+    return { projectId, groupId: rawProjectId ?? null, gatewayUrl: gatewayUrl ?? null }
   }
 
   log.warn('resolveCtx: no project context found — no .quorum file and no env vars set')

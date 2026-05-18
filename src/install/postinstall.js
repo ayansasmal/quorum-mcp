@@ -37,13 +37,13 @@ const pkgRoot = existsSync(join(__dirname, 'skill'))
  * @throws {Error} If the claude CLI is not found or exits non-zero
  */
 export function registerMcpServer(serverPath) {
-  // QUORUM_GATEWAY_URL defaults to localhost for local dev; engineers running
-  // against a central gateway should update it via:
-  //   claude mcp add --scope user quorum -e QUORUM_GATEWAY_URL=https://quorum.company.internal -- node <path>
-  const gatewayUrl = process.env.QUORUM_GATEWAY_URL ?? 'http://localhost:3001'
+  // Only bake QUORUM_GATEWAY_URL into the MCP registration if it is already set
+  // in the caller's environment. Engineers set it via their shell profile or
+  // .quorum project file; we do not default to localhost here.
+  const gatewayUrl = process.env.QUORUM_GATEWAY_URL?.trim() || null
   const args = [
     'mcp', 'add', '--scope', 'user', 'quorum',
-    '-e', `QUORUM_GATEWAY_URL=${gatewayUrl}`,
+    ...(gatewayUrl ? ['-e', `QUORUM_GATEWAY_URL=${gatewayUrl}`] : []),
     '--', 'node', serverPath,
   ]
 

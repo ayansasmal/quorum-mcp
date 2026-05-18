@@ -50,7 +50,7 @@ export function findQuorumFile(startDir = process.cwd()) {
 /**
  * Load and parse the `.quorum` file from `filePath`.
  * Supports both JSON format (written by `quorum init`) and legacy key=value
- * format (e.g. `gateway_url=http://localhost:3001`).
+ * format (e.g. `gateway_url=https://quorum.company.internal`).
  * Returns null if the file cannot be read or parsed.
  * @param {string} filePath
  * @returns {QuorumFileConfig | null}
