@@ -23,10 +23,32 @@ describe('registerMcpServer', () => {
     expect(spawnSync).toHaveBeenCalledWith(
       'claude',
       ['mcp', 'add', '--scope', 'user', 'quorum',
-        '-e', expect.stringMatching(/^QUORUM_GATEWAY_URL=.+/),
         '--', 'node', '/pkg/dist/server.js'],
       { stdio: 'pipe' },
     )
+  })
+
+  it('bakes QUORUM_GATEWAY_URL when set in the environment', async () => {
+    spawnSync.mockReturnValue({ status: 0, error: null, stderr: Buffer.from('') })
+    const originalUrl = process.env.QUORUM_GATEWAY_URL
+    process.env.QUORUM_GATEWAY_URL = 'https://quorum.company.internal'
+
+    const { registerMcpServer } = await import('../../src/install/postinstall.js')
+    registerMcpServer('/pkg/dist/server.js')
+
+    expect(spawnSync).toHaveBeenCalledWith(
+      'claude',
+      ['mcp', 'add', '--scope', 'user', 'quorum',
+        '-e', 'QUORUM_GATEWAY_URL=https://quorum.company.internal',
+        '--', 'node', '/pkg/dist/server.js'],
+      { stdio: 'pipe' },
+    )
+
+    if (originalUrl === undefined) {
+      delete process.env.QUORUM_GATEWAY_URL
+    } else {
+      process.env.QUORUM_GATEWAY_URL = originalUrl
+    }
   })
 
   it('throws if the claude CLI is not found', async () => {

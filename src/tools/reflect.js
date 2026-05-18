@@ -19,8 +19,15 @@ import { handler as rememberHandler } from './remember.js'
 
 export const schema = z.object({
   task_summary: z.string().min(1).describe('Summary of the completed task'),
-  decisions_made: z.array(z.string()).optional().describe('Explicit decisions made during the task'),
-  patterns_used: z.array(z.string()).optional().describe('Patterns applied during the task'),
+  decisions_made: z.array(
+    z.string().max(500, 'Each decision must be under 500 characters')
+  ).optional().describe('Explicit decisions made during the task — each max 500 chars, plain text'),
+  patterns_used: z.array(
+    z.string().max(500, 'Each pattern must be under 500 characters')
+  ).optional().describe('Patterns applied during the task — each max 500 chars, plain text'),
+  constraints: z.array(
+    z.string().max(500, 'Each constraint must be under 500 characters')
+  ).optional().describe('Constraints discovered during the task — each max 500 chars, plain text'),
   author: z.string().optional().default('claude').describe('Authoring agent (default: claude)'),
   session_id: z.string().optional(),
 })

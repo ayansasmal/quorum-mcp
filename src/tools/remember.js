@@ -46,15 +46,46 @@ import {
 const GLOBAL_PROJECT_ID = 'global'
 
 export const schema = z.object({
-  topic: z.string().min(1).describe('Knowledge domain (e.g. auth, api, db)'),
-  key: z.string().min(1).describe('Unique identifier within the topic (e.g. token-strategy)'),
-  content: z.string().min(1).describe('The knowledge content to store'),
+  topic: z.string()
+    .regex(/^[a-z0-9-]+$/, 'topic must be kebab-case (e.g. "auth", "db-layer")')
+    .max(60)
+    .describe('Knowledge domain — kebab-case slug, max 60 chars (e.g. auth, db-layer)'),
+
+  key: z.string()
+    .regex(/^[a-z0-9-]+$/, 'key must be kebab-case (e.g. "token-strategy")')
+    .max(80)
+    .describe('Unique identifier within the topic — kebab-case slug, max 80 chars'),
+
+  content: z.string()
+    .max(500, 'Knowledge content must be under 500 characters')
+    .refine(v => !/[<>]/.test(v), 'Plain text only — no HTML characters (< >)')
+    .describe('The knowledge content to store — plain text, max 500 chars, no HTML'),
+
   domain: z.string().optional().describe('Domain name for per-domain conflict thresholds (defaults to topic)'),
-  confidence: z.number().min(0).max(1).optional().describe('Confidence score 0-1 (role floor applied automatically)'),
-  tags: z.array(z.string()).optional().describe('Searchable tags/aliases (normalized to lowercase)'),
-  reason: z.string().optional().describe('Required when superseding existing knowledge'),
-  entity_type: z.string().optional().describe('Entity type: Decision, Pattern, Constraint, Runbook, Requirement'),
+
+  confidence: z.number().min(0.5).max(1.0).optional()
+    .describe('Confidence score 0.5–1.0 (role floor applied automatically)'),
+
+  tags: z.array(
+    z.string()
+      .regex(/^[a-z0-9-]+$/, 'Each tag must be kebab-case')
+      .max(40)
+  ).max(10).optional()
+    .describe('Searchable tags — max 10, each kebab-case, max 40 chars'),
+
+  reason: z.string()
+    .min(10, 'Reason must be at least 10 characters')
+    .max(500)
+    .refine(v => !/[<>]/.test(v), 'Plain text only — no HTML characters')
+    .optional()
+    .describe('Required when superseding existing knowledge — min 10 chars, plain text'),
+
+  entity_type: z.enum(['Decision', 'Pattern', 'Constraint', 'Runbook', 'Requirement'])
+    .optional()
+    .describe('Knowledge entity type'),
+
   triggered_by: z.string().optional().describe('What triggered this write (default: engineer_decision)'),
+
   // Conflict resolution fields — used when responding to a pending conflict brief
   conflict_id: z.string().optional().describe('Conflict ID from pending() — resolves a pending decision'),
   resolution: z.enum(['supersede', 'coexist_split', 'coexist_merge', 'reject', 'escalate']).optional(),
