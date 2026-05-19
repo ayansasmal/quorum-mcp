@@ -29,7 +29,7 @@ import { v4 as uuidv4 } from 'uuid'
 import { z } from 'zod'
 import { withAuditPipeline } from '../audit/pipeline.js'
 import { detectConflict, resolveConflict, generateEnrichment, normalizeTags } from '../governance/conflict.js'
-import { enforceReasonRequired } from '../governance/constitutional.js'
+import { enforceReasonRequired, enforceConflictPartyCannotSelfResolve } from '../governance/constitutional.js'
 import { buildVersionRecord, buildForwardLink, buildAuditVersionImpact, hashContent } from '../governance/provenance.js'
 import { initialConfidence } from '../governance/confidence.js'
 import { resolveAuthorConfidence } from '../governance/authority.js'
@@ -177,6 +177,17 @@ export async function handler(pg, input, identity, ctx) {
               pg,
             )
 
+            // Embed conflict party provenance so resolveConflictDecision can
+            // enforce the no-self-approval rule even if the knowledge has been
+            // superseded by the time someone calls review().
+            const enrichmentWithMeta = {
+              ...enrichment,
+              _conflict_parties: {
+                existing_author: existing.author ?? existing.metadata?.author ?? null,
+                incoming_author: author,
+              },
+            }
+
             // Count other pending decisions for same topic:key (ordering context)
             const morePendingSameKey = await countPendingForKey(pg, input.topic, input.key, projectId)
 
@@ -188,7 +199,7 @@ export async function handler(pg, input, identity, ctx) {
               existing_content: existing.content ?? null,
               incoming_content: input.content,
               conflict_reason: conflictResult.reason,
-              enrichment,
+              enrichment: enrichmentWithMeta,
               more_pending_same_key: morePendingSameKey,
               project_id: projectId,
             })
@@ -497,6 +508,19 @@ async function resolveConflictDecision(pg, input, identity, author, confidence, 
   const key = decision.conflict_key
   const existing = await getCurrentVersion(pg, topic, key, projectId)
 
+  // Rule 4: No self-approval — conflict parties cannot resolve their own conflict.
+  // existing?.author covers the current ACTIVE version; _conflict_parties covers the
+  // original parties at conflict creation time (stored in enrichment on write).
+  const stored = decision.enrichment?._conflict_parties ?? {}
+  const conflictParties = [
+    existing?.author,
+    stored.existing_author ?? null,
+    stored.incoming_author ?? null,
+  ].filter(Boolean)
+  if (conflictParties.length > 0) {
+    enforceConflictPartyCannotSelfResolve(conflictParties, author)
+  }
+
   if (input.resolution === 'reject' || input.resolution === 'escalate') {
     await resolvePendingDecision(pg, input.conflict_id, {
       status: 'resolved',
@@ -567,9 +591,8 @@ async function resolveConflictDecision(pg, input, identity, author, confidence, 
     // Supersede original with reason pointing to both new keys
     if (existing) {
       const splitReason = `Split into ${topic}:${input.split_existing_key} and ${topic}:${input.split_incoming_key} — ${input.reason}`
-      const forwardLink = buildForwardLink({ supersededByVersion: existing.version + 1, supersededByAuthor: author })
-      await transitionVersionStatus(pg, topic, key, existing.version, KnowledgeStatus.SUPERSEDED, forwardLink, projectId)
-      void splitReason // used in audit note below
+      const forwardLink = buildForwardLink({ supersededByVersion: existing.version + 1, supersededByAuthor: author, reason: splitReason })
+      await transitionVersionStatus(pg, topic, key, existing.version, KnowledgeStatus.SUPERSEDED, forwardLink, projectId, splitReason)
     }
 
     await closeConflict(pg, input.conflict_id, 'coexist_split', input.reason, author,

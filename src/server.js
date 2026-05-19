@@ -148,6 +148,22 @@ async function resolveCtx() {
 }
 
 /**
+ * Sanitize an error message before returning it to Claude.
+ * Strips URLs, file paths, and internal implementation details to avoid
+ * leaking gateway addresses or filesystem layout via error messages.
+ * The full error is kept in the debug log.
+ * @param {Error} err
+ * @returns {string}
+ */
+function sanitizeErrorForClaude(err) {
+  const msg = err.message ?? 'Unknown error'
+  return msg
+    .replace(/https?:\/\/[^\s]+/g, '[gateway]')
+    .replace(/\/[a-z][a-z0-9/_-]+\.[a-z]+/g, '[path]')
+    .slice(0, 200)
+}
+
+/**
  * Register all tools with the MCP server.
  *
  * Identity is resolved fresh on every tool call — not captured at startup — so
@@ -162,7 +178,7 @@ async function resolveCtx() {
  */
 export function registerTools() {
   for (const { name, def } of tools) {
-    server.tool(name, def.schema.shape ?? def.schema, async input => {
+    server.tool(name, def.schema, async input => {
       log.startCall(name)
       try {
         // Resolve fresh ctx on every call — stateless, no env mutation.
@@ -270,7 +286,7 @@ export function registerTools() {
           content: [{
             type: 'text',
             text: JSON.stringify({
-              error: err.message,
+              error: sanitizeErrorForClaude(err),
               debug_log: log.path,
             }),
           }],
