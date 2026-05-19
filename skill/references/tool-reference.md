@@ -15,7 +15,7 @@ are all blocked until this is called. Call once per session (not per tool call).
 
 **Do not pass `session_id` or `author_type`** — both are derived server-side:
 - `session_id` is derived from `hash(PID + hrtime)` → `sess_` + 8 hex chars, uniquely scoping each MCP process lifetime
-- `author_type` is always `'agent'` (never caller-supplied); distinguishes MCP writes from future human dashboard writes
+- `author_type` is always `'agent'` (never caller-supplied); distinguishes MCP writes from human dashboard writes (`author_type: 'human'` on all dashboard create/promote/supersede/deprecate actions)
 
 **Returns:**
 ```json
@@ -203,6 +203,8 @@ Use when knowledge is definitively obsolete, not just superseded by a newer entr
 *"I think `topic:key` is obsolete because [reason]. Should I deprecate it?"*
 Never deprecate autonomously — deprecation is visible to all engineers and
 irreversible without a superseding entry.
+
+**Dashboard alternative:** `principal_architect` users can also deprecate from the dashboard — per-row Trash2 icon, multi-select bulk action, or "Deprecate this entry instead" inside the Edit modal. Dashboard deprecations carry `author_type: 'human'` and `triggered_by: 'dashboard'`; MCP deprecations carry `author_type: 'agent'`.
 
 ---
 

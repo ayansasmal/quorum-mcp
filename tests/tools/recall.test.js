@@ -67,13 +67,13 @@ function makeVersion(overrides = {}) {
 describe('recall — default mode (ACTIVE)', () => {
   afterEach(() => vi.clearAllMocks())
 
-  it('returns null when no version found', async () => {
+  it('returns not_found object when no version found', async () => {
     const { getCurrentVersion } = await import('../../src/graph/queries.js')
     vi.mocked(getCurrentVersion).mockResolvedValue(null)
 
     const { handler } = await import('../../src/tools/recall.js')
     const result = await handler({}, { topic: 'auth', key: 'unknown-key' }, undefined, testCtx)
-    expect(result).toBeNull()
+    expect(result).toMatchObject({ status: 'not_found', topic: 'auth', key: 'unknown-key' })
   })
 
   it('returns XML string for found ACTIVE version', async () => {
@@ -167,13 +167,13 @@ describe('recall — SUPERSEDED version', () => {
 describe('recall — history mode', () => {
   afterEach(() => vi.clearAllMocks())
 
-  it('returns null when no versions found', async () => {
+  it('returns not_found object when no versions found', async () => {
     const { getVersionHistory } = await import('../../src/graph/queries.js')
     vi.mocked(getVersionHistory).mockResolvedValue([])
 
     const { handler } = await import('../../src/tools/recall.js')
     const result = await handler({}, { topic: 'auth', key: 'token-strategy', history: true }, undefined, testCtx)
-    expect(result).toBeNull()
+    expect(result).toMatchObject({ status: 'not_found', topic: 'auth', key: 'token-strategy' })
   })
 
   it('returns formatted history string with version list', async () => {
@@ -200,13 +200,13 @@ describe('recall — history mode', () => {
 describe('recall — point-in-time mode', () => {
   afterEach(() => vi.clearAllMocks())
 
-  it('returns null when no version was active at the given date', async () => {
+  it('returns not_found object when no version was active at the given date', async () => {
     const { getVersionAtDate } = await import('../../src/graph/queries.js')
     vi.mocked(getVersionAtDate).mockResolvedValue(null)
 
     const { handler } = await import('../../src/tools/recall.js')
     const result = await handler({}, { topic: 'auth', key: 'token-strategy', at: '2023-01-01' }, undefined, testCtx)
-    expect(result).toBeNull()
+    expect(result).toMatchObject({ status: 'not_found', topic: 'auth', key: 'token-strategy' })
   })
 
   it('includes point-in-time comment in XML', async () => {
@@ -226,13 +226,13 @@ describe('recall — point-in-time mode', () => {
 describe('recall — specific version mode', () => {
   afterEach(() => vi.clearAllMocks())
 
-  it('returns null when specific version does not exist', async () => {
+  it('returns not_found object when specific version does not exist', async () => {
     const { getSpecificVersion } = await import('../../src/graph/queries.js')
     vi.mocked(getSpecificVersion).mockResolvedValue(null)
 
     const { handler } = await import('../../src/tools/recall.js')
     const result = await handler({}, { topic: 'auth', key: 'token-strategy', version: 99 }, undefined, testCtx)
-    expect(result).toBeNull()
+    expect(result).toMatchObject({ status: 'not_found', topic: 'auth', key: 'token-strategy' })
   })
 
   it('returns the specific version when it exists', async () => {
