@@ -195,6 +195,10 @@ Use before superseding existing knowledge to understand why prior versions were 
 Deprecate knowledge permanently. Never hard-deletes — creates a `DEPRECATED` marker
 version. Requires `reason` (≥10 meaningful characters).
 
+**Requires `principal_architect` role.** If your role is lower (e.g. `senior_engineer`),
+`forget()` returns `{ status: 'forbidden', message: '...' }`. Propose the deprecation to a
+PE — they can action it from the dashboard or MCP.
+
 Use when knowledge is definitively obsolete, not just superseded by a newer entry.
 
 **Two-row pattern:** creates a new DEPRECATED version row (reason + author recorded) AND transitions the old ACTIVE row to DEPRECATED. Both rows share `status = DEPRECATED` — this is correct; do not interpret it as duplicate data.

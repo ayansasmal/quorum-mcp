@@ -40,7 +40,47 @@ vi.mock('../../src/audit/pipeline.js', () => ({
 
 const mockPg = {}
 const humanIdentity = { name: 'senior-architect', team: 'platform', role: 'principal_architect', base_confidence: 0.9, method: 'github_token' }
+const juniorIdentity = { name: 'junior-dev', team: 'platform', role: 'senior_engineer', base_confidence: 0.7, method: 'github_token' }
 const testCtx = { projectId: 'test-project', gatewayUrl: 'http://localhost:3001' }
+
+describe('forget — role guard', () => {
+  afterEach(() => vi.clearAllMocks())
+
+  it('returns forbidden when caller is not principal_architect', async () => {
+    const { handler } = await import('../../src/tools/forget.js')
+    const result = await handler(mockPg, {
+      topic: 'auth', key: 'token-strategy', reason: 'Replaced by new OAuth approach with PKCE',
+    }, juniorIdentity, testCtx)
+
+    expect(result.status).toBe('forbidden')
+    expect(result.message).toContain('principal_architect')
+    expect(result.message).toContain('senior_engineer')
+    expect(result.topic).toBe('auth')
+    expect(result.key).toBe('token-strategy')
+  })
+
+  it('returns forbidden when identity is missing (anonymous caller)', async () => {
+    const { handler } = await import('../../src/tools/forget.js')
+    const result = await handler(mockPg, {
+      topic: 'auth', key: 'token-strategy', reason: 'Replaced by new OAuth approach with PKCE',
+    }, undefined, testCtx)
+
+    expect(result.status).toBe('forbidden')
+    expect(result.message).toContain('unknown')
+  })
+
+  it('allows is_admin to bypass PE role check', async () => {
+    const { getCurrentVersion } = await import('../../src/graph/queries.js')
+    vi.mocked(getCurrentVersion).mockResolvedValue(null)
+
+    const { handler } = await import('../../src/tools/forget.js')
+    const result = await handler(mockPg, {
+      topic: 'auth', key: 'absent', reason: 'Replaced by new OAuth approach with PKCE',
+    }, { name: 'admin-user', role: 'senior_engineer', is_admin: true }, testCtx)
+
+    expect(result.status).not.toBe('forbidden')
+  })
+})
 
 describe('forget — input validation', () => {
   afterEach(() => vi.clearAllMocks())
@@ -148,7 +188,7 @@ describe('forget — happy path', () => {
     expect(deleteEpisodeSoft).not.toHaveBeenCalled()
   })
 
-  it('uses anonymous when identity is missing', async () => {
+  it('uses anonymous author when PE identity has no name', async () => {
     const { getCurrentVersion, getNextVersionNumber, transitionVersionStatus } = await import('../../src/graph/queries.js')
     vi.mocked(getCurrentVersion).mockResolvedValue({
       version: 1, status: 'ACTIVE', author: 'a', graphiti_episode_id: null,
@@ -156,9 +196,10 @@ describe('forget — happy path', () => {
     vi.mocked(getNextVersionNumber).mockResolvedValue(2)
 
     const { handler } = await import('../../src/tools/forget.js')
+    // PE role present but no name — author should fall back to 'anonymous'
     await handler(mockPg, {
       topic: 'auth', key: 'x', reason: 'Deprecating outdated strategy after audit',
-    }, undefined, testCtx)
+    }, { role: 'principal_architect' }, testCtx)
 
     expect(transitionVersionStatus).toHaveBeenCalledWith(
       mockPg, 'auth', 'x', 1, 'DEPRECATED',

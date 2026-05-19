@@ -33,6 +33,16 @@ export async function handler(pg, input, identity, ctx) {
   if (!projectId) throw new Error('forget: ctx.projectId is required — ensure a .quorum file exists in this workspace')
   const author = identity?.name ?? 'anonymous'
 
+  // Deprecation is an irreversible PE action — matches dashboard requirement
+  if (identity?.role !== 'principal_architect' && !identity?.is_admin) {
+    return {
+      status: 'forbidden',
+      message: `forget() requires principal_architect role. Your role: ${identity?.role ?? 'unknown'}. Propose the deprecation to a PE — they can action it from the dashboard or MCP.`,
+      topic: input.topic,
+      key: input.key,
+    }
+  }
+
   // Constitutional rules checked before pipeline wrapping
   enforceNoHardDelete('forget')
   enforceReasonRequired(input.reason, 'forget')
