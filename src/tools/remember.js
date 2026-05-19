@@ -578,9 +578,8 @@ async function resolveConflictDecision(pg, input, identity, author, confidence, 
     // Supersede original with reason pointing to both new keys
     if (existing) {
       const splitReason = `Split into ${topic}:${input.split_existing_key} and ${topic}:${input.split_incoming_key} — ${input.reason}`
-      const forwardLink = buildForwardLink({ supersededByVersion: existing.version + 1, supersededByAuthor: author })
-      await transitionVersionStatus(pg, topic, key, existing.version, KnowledgeStatus.SUPERSEDED, forwardLink, projectId)
-      void splitReason // used in audit note below
+      const forwardLink = buildForwardLink({ supersededByVersion: existing.version + 1, supersededByAuthor: author, reason: splitReason })
+      await transitionVersionStatus(pg, topic, key, existing.version, KnowledgeStatus.SUPERSEDED, forwardLink, projectId, splitReason)
     }
 
     await closeConflict(pg, input.conflict_id, 'coexist_split', input.reason, author,

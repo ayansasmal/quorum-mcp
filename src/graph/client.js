@@ -250,6 +250,7 @@ async function callGraphiti(tool, params, maxRetries = 3) {
           'Mcp-Session-Id': _sessionId,
           ...authHeaders,
         },
+        signal: AbortSignal.timeout(30_000),
         body: JSON.stringify({
           jsonrpc: '2.0',
           id:      Date.now(),

@@ -15,6 +15,7 @@
  */
 
 import { log } from '../logger.js'
+import { clearIdentityCache } from '../identity/resolver.js'
 
 const REFRESH_BUFFER_S = 60  // Treat token as expired 60s before actual expiry
 
@@ -187,6 +188,7 @@ export class GatewayClient {
     const response = await fetch(`${this._gatewayUrl}${path}`, {
       method,
       headers,
+      signal: AbortSignal.timeout(30_000),
       ...(body != null ? { body: JSON.stringify(body) } : {}),
     })
 
@@ -437,10 +439,13 @@ export function isAuthenticated() {
 /**
  * Store the Gateway-MCP token issued after a successful OAuth 2.1 flow.
  * Token is in-memory only — cleared when the MCP process restarts.
+ * Clears the identity cache so stale profiles are not used after re-authentication.
  * @param {string | null} token - Gateway-MCP Token (ES256 JWT) or null to clear
  */
 export function setGatewayToken(token) {
   _runtimeToken = token
+  _runtimeProfile = null
+  clearIdentityCache()
 }
 
 /** Backward-compatible alias for setGatewayToken. */
