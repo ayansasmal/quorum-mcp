@@ -37,6 +37,17 @@ export const schema = z.object({
  */
 
 /**
+ * Sanitize LLM-extracted content before storage.
+ * Strips < > characters and enforces the 500-char limit that remember() requires.
+ * @param {unknown} s
+ * @returns {string}
+ */
+function sanitizeContent(s) {
+  if (typeof s !== 'string') return ''
+  return s.replace(/[<>]/g, '').slice(0, 500)
+}
+
+/**
  * Extract learnable knowledge via the gateway LLM (POST /governance/extract).
  * The MCP never calls OpenAI directly — the gateway owns the LLM key.
  * Returns empty array with a logged warning when the gateway endpoint is unavailable.
@@ -99,7 +110,7 @@ export async function handler(pg, input, identity, ctx) {
     pg,
     {
       tool: 'reflect',
-      author: input.author ?? 'claude',
+      author: identity?.name ?? 'claude',
       sessionId: input.session_id,
       governanceData: { task_summary_length: input.task_summary.length },
     },
@@ -129,8 +140,8 @@ export async function handler(pg, input, identity, ctx) {
           const result = await rememberHandler(pg, {
             topic: item.topic,
             key: item.key,
-            content: item.content,
-            author: input.author ?? 'claude',
+            content: sanitizeContent(item.content),
+            author: identity?.name ?? 'claude',
             confidence: item.confidence,
             entity_type: item.entity_type,
             triggered_by: TriggeredBy.REFLECT,

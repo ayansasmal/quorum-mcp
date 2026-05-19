@@ -29,7 +29,7 @@ import { v4 as uuidv4 } from 'uuid'
 import { z } from 'zod'
 import { withAuditPipeline } from '../audit/pipeline.js'
 import { detectConflict, resolveConflict, generateEnrichment, normalizeTags } from '../governance/conflict.js'
-import { enforceReasonRequired } from '../governance/constitutional.js'
+import { enforceReasonRequired, enforceConflictPartyCannotSelfResolve } from '../governance/constitutional.js'
 import { buildVersionRecord, buildForwardLink, buildAuditVersionImpact, hashContent } from '../governance/provenance.js'
 import { initialConfidence } from '../governance/confidence.js'
 import { resolveAuthorConfidence } from '../governance/authority.js'
@@ -496,6 +496,17 @@ async function resolveConflictDecision(pg, input, identity, author, confidence, 
   const topic = decision.conflict_topic
   const key = decision.conflict_key
   const existing = await getCurrentVersion(pg, topic, key, projectId)
+
+  // Rule 4: No self-approval — conflict parties cannot resolve their own conflict.
+  // Collect all known conflict parties: existing version author + incoming author (if stored).
+  const conflictParties = [
+    existing?.author,
+    decision.existing_author ?? null,
+    decision.incoming_author ?? null,
+  ].filter(Boolean)
+  if (conflictParties.length > 0) {
+    enforceConflictPartyCannotSelfResolve(conflictParties, author)
+  }
 
   if (input.resolution === 'reject' || input.resolution === 'escalate') {
     await resolvePendingDecision(pg, input.conflict_id, {

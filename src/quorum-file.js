@@ -19,6 +19,31 @@ import { readFileSync, existsSync } from 'node:fs'
 import { dirname, join, parse as parsePath } from 'node:path'
 
 const FILENAME = '.quorum'
+const DEFAULT_GATEWAY_URL = 'http://localhost:3001'
+
+/**
+ * Validate a gateway URL to prevent SSRF attacks.
+ * Allows https for any host, http only for localhost/127.0.0.1/private ranges.
+ * Blocks link-local/metadata endpoints (169.254.x.x).
+ * @param {string} url
+ * @returns {boolean}
+ */
+function validateGatewayUrl(url) {
+  let parsed
+  try { parsed = new URL(url) } catch { return false }
+  // Allow http for localhost/127.0.0.1 dev only; require https otherwise
+  if (parsed.protocol === 'http:') {
+    const host = parsed.hostname
+    if (host !== 'localhost' && host !== '127.0.0.1' && !host.startsWith('192.168.') && !host.startsWith('10.') && !host.startsWith('172.')) {
+      return false
+    }
+  } else if (parsed.protocol !== 'https:') {
+    return false
+  }
+  // Block link-local / metadata endpoints
+  if (parsed.hostname === '169.254.169.254') return false
+  return true
+}
 
 /**
  * @typedef {Object} QuorumFileConfig
@@ -79,8 +104,15 @@ export function loadQuorumFile(filePath) {
       return null
     }
 
+    const rawGatewayUrl = String(raw.gateway_url).replace(/\/$/, '').trim()
+    let resolvedGatewayUrl = rawGatewayUrl
+    if (!validateGatewayUrl(rawGatewayUrl)) {
+      console.error(`[Quorum] .quorum gateway_url "${rawGatewayUrl}" failed validation (must be https, or http for localhost/private ranges only; link-local addresses blocked) — falling back to ${DEFAULT_GATEWAY_URL}`)
+      resolvedGatewayUrl = DEFAULT_GATEWAY_URL
+    }
+
     return {
-      gateway_url:  String(raw.gateway_url).replace(/\/$/, '').trim(),
+      gateway_url:  resolvedGatewayUrl,
       project_id:   String(raw.project_id).trim(),
       q_project_id: raw.q_project_id ? String(raw.q_project_id).trim() : undefined,
       _source:      filePath,
