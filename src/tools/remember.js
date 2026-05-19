@@ -177,6 +177,17 @@ export async function handler(pg, input, identity, ctx) {
               pg,
             )
 
+            // Embed conflict party provenance so resolveConflictDecision can
+            // enforce the no-self-approval rule even if the knowledge has been
+            // superseded by the time someone calls review().
+            const enrichmentWithMeta = {
+              ...enrichment,
+              _conflict_parties: {
+                existing_author: existing.author ?? existing.metadata?.author ?? null,
+                incoming_author: author,
+              },
+            }
+
             // Count other pending decisions for same topic:key (ordering context)
             const morePendingSameKey = await countPendingForKey(pg, input.topic, input.key, projectId)
 
@@ -188,7 +199,7 @@ export async function handler(pg, input, identity, ctx) {
               existing_content: existing.content ?? null,
               incoming_content: input.content,
               conflict_reason: conflictResult.reason,
-              enrichment,
+              enrichment: enrichmentWithMeta,
               more_pending_same_key: morePendingSameKey,
               project_id: projectId,
             })
@@ -498,11 +509,13 @@ async function resolveConflictDecision(pg, input, identity, author, confidence, 
   const existing = await getCurrentVersion(pg, topic, key, projectId)
 
   // Rule 4: No self-approval — conflict parties cannot resolve their own conflict.
-  // Collect all known conflict parties: existing version author + incoming author (if stored).
+  // existing?.author covers the current ACTIVE version; _conflict_parties covers the
+  // original parties at conflict creation time (stored in enrichment on write).
+  const stored = decision.enrichment?._conflict_parties ?? {}
   const conflictParties = [
     existing?.author,
-    decision.existing_author ?? null,
-    decision.incoming_author ?? null,
+    stored.existing_author ?? null,
+    stored.incoming_author ?? null,
   ].filter(Boolean)
   if (conflictParties.length > 0) {
     enforceConflictPartyCannotSelfResolve(conflictParties, author)

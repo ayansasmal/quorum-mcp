@@ -34,7 +34,13 @@ function validateGatewayUrl(url) {
   // Allow http for localhost/127.0.0.1 dev only; require https otherwise
   if (parsed.protocol === 'http:') {
     const host = parsed.hostname
-    if (host !== 'localhost' && host !== '127.0.0.1' && !host.startsWith('192.168.') && !host.startsWith('10.') && !host.startsWith('172.')) {
+    const isPrivate172 = (() => {
+      const parts = host.split('.')
+      if (parts[0] !== '172' || parts.length < 2) return false
+      const second = parseInt(parts[1], 10)
+      return second >= 16 && second <= 31  // RFC 1918: 172.16.0.0/12 only
+    })()
+    if (host !== 'localhost' && host !== '127.0.0.1' && !host.startsWith('192.168.') && !host.startsWith('10.') && !isPrivate172) {
       return false
     }
   } else if (parsed.protocol !== 'https:') {
