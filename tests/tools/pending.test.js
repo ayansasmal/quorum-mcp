@@ -146,3 +146,126 @@ describe('pending() — staleness detection', () => {
     })
   })
 })
+
+describe('pending() — deprecation_requests section', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    getPendingDecisions.mockResolvedValue([])
+    getDraftVersions.mockResolvedValue([])
+  })
+
+  it('returns deprecation_requests populated from pending rows with decision_type=deprecation_request', async () => {
+    getPendingDecisions.mockResolvedValue([
+      {
+        conflict_id:               'q_c12',
+        decision_type:             'deprecation_request',
+        conflict_topic:            'auth',
+        conflict_key:              'token-strategy',
+        conflict_reason:           'Replaced by new OAuth flow with PKCE',
+        existing_content:          'Use JWT for Lambda',
+        active_version_at_creation: 3,
+        enrichment:                { requestor: 'junior-dev' },
+        stale_warning:             null,
+        created_at:                new Date().toISOString(),
+      },
+    ])
+    getCurrentVersion.mockResolvedValue({ version: 3, status: 'ACTIVE' })
+
+    const result = await handler(pg, {}, identity, testCtx)
+
+    expect(result.deprecation_requests).toHaveLength(1)
+    const req = result.deprecation_requests[0]
+    expect(req.request_id).toBe('q_c12')
+    expect(req.topic).toBe('auth')
+    expect(req.key).toBe('token-strategy')
+    expect(req.requestor).toBe('junior-dev')
+    expect(req.reason).toBe('Replaced by new OAuth flow with PKCE')
+    expect(req.current_content).toBe('Use JWT for Lambda')
+    expect(req.current_version).toBe(3)
+    expect(req.stale_warning).toBeNull()
+  })
+
+  it('conflict rows are not included in deprecation_requests and vice versa', async () => {
+    getPendingDecisions.mockResolvedValue([
+      makePendingRow({ decision_type: 'conflict' }),
+      {
+        conflict_id:               'q_c12',
+        decision_type:             'deprecation_request',
+        conflict_topic:            'auth',
+        conflict_key:              'token-strategy',
+        conflict_reason:           'Replaced by new OAuth flow with PKCE',
+        existing_content:          'Use JWT',
+        active_version_at_creation: 1,
+        enrichment:                { requestor: 'junior-dev' },
+        stale_warning:             null,
+        created_at:                new Date().toISOString(),
+      },
+    ])
+    getCurrentVersion.mockResolvedValue({ version: 1, status: 'ACTIVE' })
+
+    const result = await handler(pg, {}, identity, testCtx)
+
+    expect(result.conflict_briefs).toHaveLength(1)
+    expect(result.deprecation_requests).toHaveLength(1)
+    expect(result.conflict_briefs[0].conflict_id).toBe('conflict_abc')
+    expect(result.deprecation_requests[0].request_id).toBe('q_c12')
+  })
+
+  it('sets stale_warning when ACTIVE version advanced since request was created', async () => {
+    getPendingDecisions.mockResolvedValue([
+      {
+        conflict_id:               'q_c12',
+        decision_type:             'deprecation_request',
+        conflict_topic:            'auth',
+        conflict_key:              'token-strategy',
+        conflict_reason:           'Reason for deprecation with enough chars',
+        existing_content:          'old content',
+        active_version_at_creation: 1,
+        enrichment:                { requestor: 'junior-dev' },
+        stale_warning:             null,
+        created_at:                new Date().toISOString(),
+      },
+    ])
+    getCurrentVersion.mockResolvedValue({ version: 4, status: 'ACTIVE' })
+    markPendingDecisionStale.mockResolvedValue(undefined)
+
+    const result = await handler(pg, {}, identity, testCtx)
+
+    expect(result.deprecation_requests[0].stale_warning).toBeTruthy()
+    expect(result.deprecation_requests[0].stale_warning).toMatch(/v1/)
+    expect(result.deprecation_requests[0].stale_warning).toMatch(/v4/)
+    expect(markPendingDecisionStale).toHaveBeenCalledWith(
+      pg, 'q_c12', expect.stringContaining('v4'), 4, 'test-project',
+    )
+  })
+
+  it('summary includes deprecation_requests count', async () => {
+    getPendingDecisions.mockResolvedValue([
+      {
+        conflict_id:               'q_c12',
+        decision_type:             'deprecation_request',
+        conflict_topic:            'auth',
+        conflict_key:              'x',
+        conflict_reason:           'reason',
+        existing_content:          'content',
+        active_version_at_creation: 1,
+        enrichment:                { requestor: 'jr' },
+        stale_warning:             null,
+        created_at:                new Date().toISOString(),
+      },
+    ])
+    getCurrentVersion.mockResolvedValue({ version: 1 })
+
+    const result = await handler(pg, {}, identity, testCtx)
+
+    expect(result.summary.deprecation_requests).toBe(1)
+    expect(result.summary.total_pending).toBe(1)
+  })
+
+  it('empty queue returns deprecation_requests: [] and count 0 in summary', async () => {
+    getPendingDecisions.mockResolvedValue([])
+    const result = await handler(pg, {}, identity, testCtx)
+    expect(result.deprecation_requests).toEqual([])
+    expect(result.summary.deprecation_requests).toBe(0)
+  })
+})

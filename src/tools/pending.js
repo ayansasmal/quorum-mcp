@@ -51,19 +51,22 @@ export async function handler(pg, input, identity, ctx) {
       governanceData: { topic: input.topic, include_stale: input.include_stale },
     },
     async () => {
-      const [conflictBriefs, draftReviews] = await Promise.all([
+      const [conflictBriefs, draftReviews, deprecationRequests] = await Promise.all([
         fetchConflictBriefs(pg, input, projectId),
         fetchDraftReviews(pg, input, projectId),
+        fetchDeprecationRequests(pg, input, projectId),
       ])
 
       return {
         result: {
-          conflict_briefs: conflictBriefs,
-          draft_reviews: draftReviews,
+          conflict_briefs:      conflictBriefs,
+          draft_reviews:        draftReviews,
+          deprecation_requests: deprecationRequests,
           summary: {
-            total_pending: conflictBriefs.length + draftReviews.length,
-            conflicts: conflictBriefs.length,
-            drafts: draftReviews.length,
+            total_pending:        conflictBriefs.length + draftReviews.length + deprecationRequests.length,
+            conflicts:            conflictBriefs.length,
+            drafts:               draftReviews.length,
+            deprecation_requests: deprecationRequests.length,
           },
         },
         versionImpact: buildAuditVersionImpact([], []),
@@ -84,7 +87,9 @@ export async function handler(pg, input, identity, ctx) {
  */
 async function fetchConflictBriefs(pg, input, projectId) {
   const statuses = input.include_stale ? ['pending', 'stale'] : ['pending']
-  const rows = await getPendingDecisions(pg, { topic: input.topic, statuses, decisionType: 'conflict', projectId })
+  const allRows = await getPendingDecisions(pg, { topic: input.topic, statuses, decisionType: 'conflict', projectId })
+  // Gateway duck-type returns all decision_type values — filter client-side
+  const rows = allRows.filter(r => (r.decision_type ?? 'conflict') === 'conflict')
 
   const results = []
 
@@ -130,6 +135,58 @@ async function fetchConflictBriefs(pg, input, projectId) {
         enrichment: row.enrichment ?? null,
       },
       options: ['supersede', 'coexist_split', 'coexist_merge', 'reject', 'escalate'],
+    })
+  }
+
+  return results
+}
+
+// ── Deprecation requests ──────────────────────────────────────────────────────
+
+/**
+ * Fetch pending deprecation requests, run staleness detection, return enriched list.
+ * @param {import('pg').Pool} pg
+ * @param {z.infer<typeof schema>} input
+ * @param {string} projectId
+ * @returns {Promise<Array<Record<string, unknown>>>}
+ */
+async function fetchDeprecationRequests(pg, input, projectId) {
+  const statuses = input.include_stale ? ['pending', 'stale'] : ['pending']
+  const allRows = await getPendingDecisions(pg, { topic: input.topic, statuses, projectId })
+  const rows = allRows.filter(r => r.decision_type === 'deprecation_request')
+
+  const results = []
+
+  for (const row of rows) {
+    const currentActive = await getCurrentVersion(pg, row.conflict_topic, row.conflict_key, projectId)
+    const currentVersion = currentActive?.version ?? null
+
+    let staleWarning = row.stale_warning
+
+    if (
+      currentVersion !== null &&
+      row.active_version_at_creation !== null &&
+      currentVersion > row.active_version_at_creation &&
+      !staleWarning
+    ) {
+      staleWarning = `Active version advanced from v${row.active_version_at_creation} to v${currentVersion} since this request was created. Review is now against the current active version.`
+      await markPendingDecisionStale(pg, row.conflict_id, staleWarning, currentVersion, projectId)
+    }
+
+    const enrichment = typeof row.enrichment === 'string'
+      ? JSON.parse(row.enrichment)
+      : (row.enrichment ?? {})
+
+    results.push({
+      request_id:      row.conflict_id,
+      topic:           row.conflict_topic,
+      key:             row.conflict_key,
+      requestor:       enrichment.requestor ?? 'unknown',
+      reason:          row.conflict_reason,
+      current_content: row.existing_content ?? null,
+      current_version: currentVersion,
+      created_at:      row.created_at,
+      stale_warning:   staleWarning ?? null,
     })
   }
 
