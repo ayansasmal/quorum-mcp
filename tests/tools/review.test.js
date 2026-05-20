@@ -23,18 +23,30 @@ vi.mock('../../src/governance/constitutional.js', () => ({
 
 vi.mock('../../src/governance/provenance.js', () => ({
   buildAuditVersionImpact: vi.fn(() => ({ versions_created: [], versions_superseded: [] })),
+  buildVersionRecord:      vi.fn(() => ({ topic: 'auth', key: 'token-strategy', version: 2 })),
 }))
 
 vi.mock('../../src/graph/schema.js', () => ({
-  KnowledgeStatus: { ACTIVE: 'ACTIVE', DRAFT: 'DRAFT', REJECTED: 'REJECTED' },
+  KnowledgeStatus: { ACTIVE: 'ACTIVE', DRAFT: 'DRAFT', REJECTED: 'REJECTED', DEPRECATED: 'DEPRECATED' },
+  TriggeredBy:     { HUMAN_DECISION: 'human_decision', ENGINEER_DECISION: 'engineer_decision' },
 }))
 
 vi.mock('../../src/graph/queries.js', () => ({
-  getCurrentVersion: vi.fn(),
-  getSpecificVersion: vi.fn(),
+  getCurrentVersion:       vi.fn(),
+  getSpecificVersion:      vi.fn(),
   transitionVersionStatus: vi.fn(),
-  getLatestDraftVersion: vi.fn(),
-  incrementDomainStat: vi.fn().mockResolvedValue(undefined),
+  getLatestDraftVersion:   vi.fn(),
+  incrementDomainStat:     vi.fn().mockResolvedValue(undefined),
+  getPendingDecisionById:  vi.fn(),
+  resolvePendingDecision:  vi.fn().mockResolvedValue(undefined),
+  getNextVersionNumber:    vi.fn(),
+  insertVersion:           vi.fn().mockResolvedValue({ version_id: 'q_k1_v2', q_key_id: 'q_k1' }),
+}))
+
+vi.mock('../../src/graph/client.js', () => ({
+  deleteEpisodeSoft: vi.fn().mockResolvedValue({}),
+  BLOCKED_METHODS:   new Set(),
+  isMethodBlocked:   vi.fn(() => false),
 }))
 
 vi.mock('../../src/config/loader.js', () => ({
@@ -355,5 +367,146 @@ describe('review — config load failure (permissive fallback)', () => {
 
     // Should not return unauthorized — config failure is permissive
     expect(result.status).toBe('approved')
+  })
+})
+
+// ── Deprecation request tests ─────────────────────────────────────────────────
+
+const peIdentity = { name: 'senior-architect', role: 'principal_architect', team: 'platform' }
+const juniorIdentity = { name: 'junior-dev', role: 'senior_engineer', team: 'platform' }
+const mockPg = {}
+
+function makeDeprecationRequestRow(overrides = {}) {
+  return {
+    conflict_id:               'q_c12',
+    decision_type:             'deprecation_request',
+    status:                    'pending',
+    conflict_topic:            'auth',
+    conflict_key:              'token-strategy',
+    conflict_reason:           'Replaced by new OAuth flow with PKCE',
+    existing_content:          'Use JWT for Lambda',
+    active_version_at_creation: 3,
+    enrichment:                { requestor: 'junior-dev' },
+    q_project_id:              'test-project',
+    ...overrides,
+  }
+}
+
+describe('review() — deprecation request: approve', () => {
+  afterEach(() => vi.clearAllMocks())
+
+  it('runs deprecation logic and resolves pending row on approve', async () => {
+    const {
+      getPendingDecisionById, resolvePendingDecision,
+      getCurrentVersion, getNextVersionNumber, insertVersion, transitionVersionStatus,
+    } = await import('../../src/graph/queries.js')
+    vi.mocked(getPendingDecisionById).mockResolvedValue(makeDeprecationRequestRow())
+    vi.mocked(getCurrentVersion).mockResolvedValue({
+      version: 3, status: 'ACTIVE', author: 'someone', graphiti_episode_id: null,
+    })
+    vi.mocked(getNextVersionNumber).mockResolvedValue(4)
+
+    const { handler } = await import('../../src/tools/review.js')
+    const result = await handler(mockPg, {
+      action: 'approve',
+      request_id: 'q_c12',
+      note: 'Approved — obsolete after migration to OAuth2',
+    }, peIdentity, testCtx)
+
+    expect(result.status).toBe('approved')
+    expect(result.request_id).toBe('q_c12')
+    expect(result.topic).toBe('auth')
+    expect(result.key).toBe('token-strategy')
+    expect(result.deprecated_version).toBe(3)
+    expect(result.deprecation_version).toBe(4)
+    expect(insertVersion).toHaveBeenCalled()
+    expect(transitionVersionStatus).toHaveBeenCalledWith(
+      mockPg, 'auth', 'token-strategy', 3, 'DEPRECATED',
+      expect.objectContaining({ version: 4, author: 'senior-architect' }),
+      'test-project',
+    )
+    expect(resolvePendingDecision).toHaveBeenCalledWith(
+      mockPg, 'q_c12',
+      expect.objectContaining({ status: 'resolved', resolution: 'approved', resolvedBy: 'senior-architect' }),
+    )
+  })
+
+  it('returns not_found if request_id does not point to a deprecation_request', async () => {
+    const { getPendingDecisionById } = await import('../../src/graph/queries.js')
+    vi.mocked(getPendingDecisionById).mockResolvedValue(null)
+
+    const { handler } = await import('../../src/tools/review.js')
+    const result = await handler(mockPg, {
+      action: 'approve', request_id: 'q_c99',
+      note: 'Approved — obsolete after migration to OAuth2',
+    }, peIdentity, testCtx)
+
+    expect(result.status).toBe('not_found')
+    expect(result.request_id).toBe('q_c99')
+  })
+
+  it('returns already_resolved if the request is not pending', async () => {
+    const { getPendingDecisionById } = await import('../../src/graph/queries.js')
+    vi.mocked(getPendingDecisionById).mockResolvedValue(
+      makeDeprecationRequestRow({ status: 'resolved', resolution: 'approved' }),
+    )
+
+    const { handler } = await import('../../src/tools/review.js')
+    const result = await handler(mockPg, {
+      action: 'approve', request_id: 'q_c12',
+      note: 'Approved — obsolete after migration to OAuth2',
+    }, peIdentity, testCtx)
+
+    expect(result.status).toBe('already_resolved')
+    expect(result.resolution).toBe('approved')
+  })
+
+  it('returns forbidden for non-PE trying to approve a deprecation request', async () => {
+    const { getPendingDecisionById } = await import('../../src/graph/queries.js')
+    vi.mocked(getPendingDecisionById).mockResolvedValue(makeDeprecationRequestRow())
+
+    const { handler } = await import('../../src/tools/review.js')
+    const result = await handler(mockPg, {
+      action: 'approve', request_id: 'q_c12',
+      note: 'Approved — obsolete after migration to OAuth2',
+    }, juniorIdentity, testCtx)
+
+    expect(result.status).toBe('forbidden')
+  })
+
+  it('returns invalid_action for request_changes on a deprecation request', async () => {
+    const { getPendingDecisionById } = await import('../../src/graph/queries.js')
+    vi.mocked(getPendingDecisionById).mockResolvedValue(makeDeprecationRequestRow())
+
+    const { handler } = await import('../../src/tools/review.js')
+    const result = await handler(mockPg, {
+      action: 'request_changes', request_id: 'q_c12',
+      note: 'Please reconsider this deprecation request',
+    }, peIdentity, testCtx)
+
+    expect(result.status).toBe('invalid_action')
+  })
+})
+
+describe('review() — deprecation request: reject', () => {
+  afterEach(() => vi.clearAllMocks())
+
+  it('resolves pending row as rejected without running deprecation logic', async () => {
+    const { getPendingDecisionById, resolvePendingDecision, insertVersion } = await import('../../src/graph/queries.js')
+    vi.mocked(getPendingDecisionById).mockResolvedValue(makeDeprecationRequestRow())
+
+    const { handler } = await import('../../src/tools/review.js')
+    const result = await handler(mockPg, {
+      action: 'reject', request_id: 'q_c12',
+      note: 'Entry is still needed by the payments domain',
+    }, peIdentity, testCtx)
+
+    expect(result.status).toBe('rejected')
+    expect(result.request_id).toBe('q_c12')
+    expect(insertVersion).not.toHaveBeenCalled()
+    expect(resolvePendingDecision).toHaveBeenCalledWith(
+      mockPg, 'q_c12',
+      expect.objectContaining({ status: 'resolved', resolution: 'rejected' }),
+    )
   })
 })

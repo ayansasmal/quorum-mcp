@@ -21,17 +21,23 @@
 import { z } from 'zod'
 import { withAuditPipeline } from '../audit/pipeline.js'
 import { enforceNoSelfApproval, enforceReasonRequired } from '../governance/constitutional.js'
-import { buildAuditVersionImpact } from '../governance/provenance.js'
-import { KnowledgeStatus } from '../graph/schema.js'
-import { getCurrentVersion, getSpecificVersion, transitionVersionStatus, getLatestDraftVersion, incrementDomainStat } from '../graph/queries.js'
+import { buildAuditVersionImpact, buildVersionRecord } from '../governance/provenance.js'
+import { KnowledgeStatus, TriggeredBy } from '../graph/schema.js'
+import {
+  getCurrentVersion, getSpecificVersion, transitionVersionStatus,
+  getLatestDraftVersion, incrementDomainStat,
+  getPendingDecisionById, resolvePendingDecision, getNextVersionNumber, insertVersion,
+} from '../graph/queries.js'
+import { deleteEpisodeSoft } from '../graph/client.js'
 import { getConfig } from '../config/loader.js'
 
 export const schema = z.object({
-  action: z.enum(['approve', 'reject', 'request_changes']),
-  topic: z.string().min(1),
-  key: z.string().min(1),
-  note: z.string().min(1).describe('Required: reason for this decision'),
-  version: z.number().int().positive().optional().describe('Specific version to review (defaults to latest DRAFT)'),
+  action:     z.enum(['approve', 'reject', 'request_changes']),
+  topic:      z.string().min(1).optional().describe('Target topic (required for DRAFT reviews; omit when using request_id)'),
+  key:        z.string().min(1).optional().describe('Target key (required for DRAFT reviews; omit when using request_id)'),
+  note:       z.string().min(1).describe('Required: reason for this decision'),
+  request_id: z.string().optional().describe('For deprecation requests: the request_id returned by pending()'),
+  version:    z.number().int().positive().optional().describe('Specific version to review (defaults to latest DRAFT)'),
   session_id: z.string().optional(),
 })
 
@@ -50,6 +56,11 @@ export async function handler(pg, input, identity, ctx) {
 
   // Constitutional Rule 3: note required — checked before pipeline
   enforceReasonRequired(input.note, 'review')
+
+  // ── Deprecation request approval path ────────────────────────────────────────
+  if (input.request_id) {
+    return handleDeprecationRequest(pg, input, identity, ctx)
+  }
 
   const pipelineResult = await withAuditPipeline(
     pg,
@@ -167,6 +178,145 @@ export async function handler(pg, input, identity, ctx) {
     },
   )
 
+  return pipelineResult.result
+}
+
+// ── Deprecation request handler ───────────────────────────────────────────────
+
+/**
+ * Approve or reject a pending deprecation request (decision_type='deprecation_request').
+ * Only principal_architect or is_admin callers may act. 'request_changes' is not valid.
+ * @param {import('pg').Pool} pg
+ * @param {z.infer<typeof schema>} input
+ * @param {import('../identity/resolver.js').ResolvedIdentity} identity
+ * @param {{ projectId: string, gatewayUrl: string } | null} ctx
+ */
+async function handleDeprecationRequest(pg, input, identity, ctx) {
+  const reviewer  = identity?.name ?? 'anonymous'
+  const projectId = ctx?.projectId
+
+  if (identity?.role !== 'principal_architect' && !identity?.is_admin) {
+    return {
+      status:     'forbidden',
+      message:    'Only principal_architect can approve or reject deprecation requests.',
+      request_id: input.request_id,
+    }
+  }
+
+  if (input.action === 'request_changes') {
+    return {
+      status:     'invalid_action',
+      message:    "request_changes is not valid for deprecation requests. Reject it and ask the requestor to re-submit forget() with a clearer reason.",
+      request_id: input.request_id,
+    }
+  }
+
+  const pipelineResult = await withAuditPipeline(
+    pg,
+    {
+      tool:     'review',
+      author:   reviewer,
+      sessionId: input.session_id,
+      governanceData: { action: input.action, note: input.note, request_id: input.request_id },
+    },
+    async () => {
+      const row = await getPendingDecisionById(pg, input.request_id)
+      if (!row || row.decision_type !== 'deprecation_request') {
+        return {
+          result: { status: 'not_found', request_id: input.request_id },
+          versionImpact: buildAuditVersionImpact([], []),
+        }
+      }
+      if (row.status !== 'pending') {
+        return {
+          result: { status: 'already_resolved', request_id: input.request_id, resolution: row.resolution },
+          versionImpact: buildAuditVersionImpact([], []),
+        }
+      }
+
+      const topic = row.conflict_topic
+      const key   = row.conflict_key
+
+      if (input.action === 'approve') {
+        const existing = await getCurrentVersion(pg, topic, key, projectId)
+        if (!existing) {
+          await resolvePendingDecision(pg, input.request_id, {
+            status: 'resolved', resolution: 'rejected',
+            note: 'Entry no longer ACTIVE at approval time.',
+            resolvedBy: reviewer,
+          })
+          return {
+            result: {
+              status:  'not_found',
+              message: `${topic}:${key} is no longer ACTIVE — possibly already deprecated. Request resolved.`,
+            },
+            versionImpact: buildAuditVersionImpact([], []),
+          }
+        }
+
+        const nextVersion = await getNextVersionNumber(pg, topic, key, projectId)
+
+        if (existing.graphiti_episode_id) {
+          await deleteEpisodeSoft(existing.graphiti_episode_id, {
+            key: `${topic}:${key}`, reason: row.conflict_reason, author: reviewer,
+          }, projectId).catch(() => {})
+        }
+
+        const versionRecord = buildVersionRecord({
+          topic,
+          key,
+          version:          nextVersion,
+          content:          `[DEPRECATED] ${row.conflict_reason}`,
+          author:           reviewer,
+          triggeredBy:      TriggeredBy.HUMAN_DECISION,
+          auditEntryId:     'pre_pending',
+          supersedesVersion: existing.version,
+          supersedesReason: row.conflict_reason,
+          status:           KnowledgeStatus.DEPRECATED,
+          projectId,
+          agentId:          ctx?.agentId    ?? null,
+          sessionId:        ctx?.sessionId  ?? null,
+          authorType:       ctx?.authorType ?? 'agent',
+        })
+        await insertVersion(pg, versionRecord)
+        await transitionVersionStatus(
+          pg, topic, key, existing.version, KnowledgeStatus.DEPRECATED,
+          { version: nextVersion, author: reviewer, at: new Date().toISOString() },
+          projectId,
+        )
+
+        await resolvePendingDecision(pg, input.request_id, {
+          status: 'resolved', resolution: 'approved',
+          note: input.note, resolvedBy: reviewer,
+        })
+
+        return {
+          result: {
+            status:              'approved',
+            request_id:          input.request_id,
+            topic,
+            key,
+            deprecated_version:  existing.version,
+            deprecation_version: nextVersion,
+          },
+          versionImpact: buildAuditVersionImpact(
+            [{ version: nextVersion, status: KnowledgeStatus.DEPRECATED, triggered_by: TriggeredBy.HUMAN_DECISION }],
+            [{ version: existing.version, status_before: existing.status }],
+          ),
+        }
+      }
+
+      // reject
+      await resolvePendingDecision(pg, input.request_id, {
+        status: 'resolved', resolution: 'rejected',
+        note: input.note, resolvedBy: reviewer,
+      })
+      return {
+        result: { status: 'rejected', request_id: input.request_id, topic, key },
+        versionImpact: buildAuditVersionImpact([], []),
+      }
+    },
+  )
   return pipelineResult.result
 }
 
