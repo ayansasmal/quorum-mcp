@@ -1,7 +1,10 @@
 /**
  * forget() — Deprecate knowledge. Never hard delete.
  *
- * Creates a new DEPRECATED version — never modifies the existing ACTIVE node.
+ * For PE/admin callers: creates a new DEPRECATED version immediately.
+ * For non-PE callers: queues a deprecation_request in pending_decisions for PE approval.
+ * Anonymous callers (no identity) always get forbidden.
+ *
  * Requires a reason (Constitutional Rule 3).
  * Calls enforceNoHardDelete() to verify the constitutional check runs (Rule 1).
  */
@@ -9,10 +12,17 @@
 import { z } from 'zod'
 import { withAuditPipeline } from '../audit/pipeline.js'
 import { enforceNoHardDelete, enforceReasonRequired } from '../governance/constitutional.js'
-import { buildVersionRecord, buildAuditVersionImpact, hashContent } from '../governance/provenance.js'
+import { buildVersionRecord, buildAuditVersionImpact } from '../governance/provenance.js'
 import { TriggeredBy, KnowledgeStatus } from '../graph/schema.js'
 import { deleteEpisodeSoft } from '../graph/client.js'
-import { getCurrentVersion, getNextVersionNumber, insertVersion, transitionVersionStatus } from '../graph/queries.js'
+import {
+  getCurrentVersion,
+  getNextVersionNumber,
+  insertVersion,
+  transitionVersionStatus,
+  getPendingDecisions,
+  insertPendingDecision,
+} from '../graph/queries.js'
 
 export const schema = z.object({
   topic: z.string().min(1),
@@ -33,20 +43,92 @@ export async function handler(pg, input, identity, ctx) {
   if (!projectId) throw new Error('forget: ctx.projectId is required — ensure a .quorum file exists in this workspace')
   const author = identity?.name ?? 'anonymous'
 
-  // Deprecation is an irreversible PE action — matches dashboard requirement
-  if (identity?.role !== 'principal_architect' && !identity?.is_admin) {
-    return {
-      status: 'forbidden',
-      message: `forget() requires principal_architect role. Your role: ${identity?.role ?? 'unknown'}. Propose the deprecation to a PE — they can action it from the dashboard or MCP.`,
-      topic: input.topic,
-      key: input.key,
-    }
-  }
-
-  // Constitutional rules checked before pipeline wrapping
+  // Constitutional rules apply to ALL callers before any branching
   enforceNoHardDelete('forget')
   enforceReasonRequired(input.reason, 'forget')
 
+  // ── Non-PE path: queue a deprecation request for PE approval ─────────────────
+  if (identity?.role !== 'principal_architect' && !identity?.is_admin) {
+    if (!identity) {
+      return {
+        status: 'forbidden',
+        message: 'forget() requires principal_architect role. Your role: unknown. Propose the deprecation to a PE — they can action it from the dashboard or MCP.',
+        topic: input.topic,
+        key: input.key,
+      }
+    }
+
+    const pipelineResult = await withAuditPipeline(
+      pg,
+      {
+        tool: 'forget',
+        author,
+        sessionId: input.session_id,
+        topic: input.topic,
+        key: input.key,
+        governanceData: { reason: input.reason, mode: 'deprecation_request' },
+      },
+      async () => {
+        const existing = await getCurrentVersion(pg, input.topic, input.key, projectId)
+        if (!existing) {
+          return {
+            result: { status: 'not_found', topic: input.topic, key: input.key },
+            versionImpact: buildAuditVersionImpact([], []),
+          }
+        }
+
+        const allRequests = await getPendingDecisions(pg, {
+          topic: input.topic,
+          statuses: ['pending'],
+          projectId,
+        })
+        const duplicate = allRequests.find((r) => {
+          if ((r.decision_type ?? 'conflict') !== 'deprecation_request') return false
+          const enrich = typeof r.enrichment === 'string'
+            ? JSON.parse(r.enrichment)
+            : (r.enrichment ?? {})
+          return enrich.requestor === author
+        })
+        if (duplicate) {
+          return {
+            result: {
+              status: 'already_requested',
+              request_id: duplicate.conflict_id,
+              topic: input.topic,
+              key: input.key,
+              message: 'You already have a pending deprecation request for this entry.',
+            },
+            versionImpact: buildAuditVersionImpact([], []),
+          }
+        }
+
+        const requestId = await insertPendingDecision(pg, {
+          decision_type: 'deprecation_request',
+          topic: input.topic,
+          key: input.key,
+          existing_content: existing.summary ?? existing.content ?? null,
+          active_version_at_creation: existing.version,
+          conflict_reason: input.reason,
+          enrichment: { requestor: author },
+          project_id: projectId,
+        })
+
+        return {
+          result: {
+            status: 'deprecation_requested',
+            request_id: requestId,
+            topic: input.topic,
+            key: input.key,
+            message: 'Deprecation request submitted. A principal_architect will review it in pending().',
+          },
+          versionImpact: buildAuditVersionImpact([], []),
+        }
+      },
+    )
+    return pipelineResult.result
+  }
+
+  // ── PE / admin path: full deprecation (unchanged) ─────────────────────────────
   const pipelineResult = await withAuditPipeline(
     pg,
     {

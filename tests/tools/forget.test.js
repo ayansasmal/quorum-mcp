@@ -30,6 +30,8 @@ vi.mock('../../src/graph/queries.js', () => ({
   transitionVersionStatus: vi.fn().mockResolvedValue(),
   insertVersionAuditLink: vi.fn().mockResolvedValue(),
   incrementDomainStat: vi.fn().mockResolvedValue(),
+  getPendingDecisions: vi.fn().mockResolvedValue([]),
+  insertPendingDecision: vi.fn().mockResolvedValue('q_c5'),
 }))
 
 vi.mock('../../src/audit/pipeline.js', () => ({
@@ -43,20 +45,81 @@ const humanIdentity = { name: 'senior-architect', team: 'platform', role: 'princ
 const juniorIdentity = { name: 'junior-dev', team: 'platform', role: 'senior_engineer', base_confidence: 0.7, method: 'github_token' }
 const testCtx = { projectId: 'test-project', gatewayUrl: 'http://localhost:3001' }
 
-describe('forget — role guard', () => {
+describe('forget — non-PE queuing path', () => {
   afterEach(() => vi.clearAllMocks())
 
-  it('returns forbidden when caller is not principal_architect', async () => {
+  it('returns deprecation_requested for a non-PE caller with an ACTIVE entry', async () => {
+    const { getCurrentVersion, getPendingDecisions, insertPendingDecision } = await import('../../src/graph/queries.js')
+    vi.mocked(getCurrentVersion).mockResolvedValue({
+      version: 3, status: 'ACTIVE', author: 'someone',
+      summary: 'Use JWT for Lambda', graphiti_episode_id: null,
+    })
+    vi.mocked(getPendingDecisions).mockResolvedValue([])
+    vi.mocked(insertPendingDecision).mockResolvedValue('q_c5')
+
     const { handler } = await import('../../src/tools/forget.js')
     const result = await handler(mockPg, {
       topic: 'auth', key: 'token-strategy', reason: 'Replaced by new OAuth approach with PKCE',
     }, juniorIdentity, testCtx)
 
-    expect(result.status).toBe('forbidden')
-    expect(result.message).toContain('principal_architect')
-    expect(result.message).toContain('senior_engineer')
+    expect(result.status).toBe('deprecation_requested')
+    expect(result.request_id).toBe('q_c5')
     expect(result.topic).toBe('auth')
     expect(result.key).toBe('token-strategy')
+    expect(result.message).toContain('principal_architect')
+    expect(insertPendingDecision).toHaveBeenCalledWith(
+      mockPg,
+      expect.objectContaining({
+        decision_type: 'deprecation_request',
+        conflict_reason: 'Replaced by new OAuth approach with PKCE',
+        existing_content: 'Use JWT for Lambda',
+        active_version_at_creation: 3,
+        enrichment: { requestor: 'junior-dev' },
+      }),
+    )
+  })
+
+  it('returns not_found when no ACTIVE entry exists for non-PE caller', async () => {
+    const { getCurrentVersion } = await import('../../src/graph/queries.js')
+    vi.mocked(getCurrentVersion).mockResolvedValue(null)
+
+    const { handler } = await import('../../src/tools/forget.js')
+    const result = await handler(mockPg, {
+      topic: 'auth', key: 'gone', reason: 'Replaced by new OAuth approach with PKCE',
+    }, juniorIdentity, testCtx)
+
+    expect(result.status).toBe('not_found')
+    expect(result.topic).toBe('auth')
+    expect(result.key).toBe('gone')
+  })
+
+  it('returns already_requested when same requestor has a pending request for this key', async () => {
+    const { getCurrentVersion, getPendingDecisions } = await import('../../src/graph/queries.js')
+    vi.mocked(getCurrentVersion).mockResolvedValue({
+      version: 1, status: 'ACTIVE', summary: 'content', graphiti_episode_id: null,
+    })
+    vi.mocked(getPendingDecisions).mockResolvedValue([
+      {
+        conflict_id: 'q_c3',
+        decision_type: 'deprecation_request',
+        enrichment: { requestor: 'junior-dev' },
+      },
+    ])
+
+    const { handler } = await import('../../src/tools/forget.js')
+    const result = await handler(mockPg, {
+      topic: 'auth', key: 'token-strategy', reason: 'Replaced by new OAuth approach with PKCE',
+    }, juniorIdentity, testCtx)
+
+    expect(result.status).toBe('already_requested')
+    expect(result.request_id).toBe('q_c3')
+  })
+
+  it('still throws ConstitutionalViolation for non-PE with short reason', async () => {
+    const { handler } = await import('../../src/tools/forget.js')
+    await expect(
+      handler(mockPg, { topic: 'auth', key: 'x', reason: 'short' }, juniorIdentity, testCtx),
+    ).rejects.toThrow(ConstitutionalViolation)
   })
 
   it('returns forbidden when identity is missing (anonymous caller)', async () => {
@@ -64,12 +127,10 @@ describe('forget — role guard', () => {
     const result = await handler(mockPg, {
       topic: 'auth', key: 'token-strategy', reason: 'Replaced by new OAuth approach with PKCE',
     }, undefined, testCtx)
-
     expect(result.status).toBe('forbidden')
-    expect(result.message).toContain('unknown')
   })
 
-  it('allows is_admin to bypass PE role check', async () => {
+  it('allows is_admin to bypass PE role check and run full deprecation', async () => {
     const { getCurrentVersion } = await import('../../src/graph/queries.js')
     vi.mocked(getCurrentVersion).mockResolvedValue(null)
 
@@ -79,6 +140,7 @@ describe('forget — role guard', () => {
     }, { name: 'admin-user', role: 'senior_engineer', is_admin: true }, testCtx)
 
     expect(result.status).not.toBe('forbidden')
+    expect(result.status).not.toBe('deprecation_requested')
   })
 })
 
