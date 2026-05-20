@@ -115,7 +115,7 @@ Returns all unresolved conflicts and DRAFT entries awaiting review.
 **Returns:**
 ```json
 {
-  "summary": { "total_pending": 3, "conflicts": 1, "drafts": 2 },
+  "summary": { "total_pending": 4, "conflicts": 1, "drafts": 2, "deprecation_requests": 1 },
   "conflict_briefs": [
     {
       "conflict_id": "cfl_abc123",
@@ -132,20 +132,45 @@ Returns all unresolved conflicts and DRAFT entries awaiting review.
       "topic": "api", "key": "error-standards",
       "content": "...", "author": "claude", "triggered_by": "reflect"
     }
+  ],
+  "deprecation_requests": [
+    {
+      "request_id": "q_c12",
+      "topic": "auth", "key": "token-strategy",
+      "requestor": "junior-dev",
+      "reason": "Replaced by new OAuth approach with PKCE",
+      "current_content": "Use JWT for Lambda",
+      "current_version": 3,
+      "created_at": "2026-05-19T10:00:00Z",
+      "stale_warning": null
+    }
   ]
 }
 ```
 
+`deprecation_requests` — pending deprecation requests from non-PE engineers. Stale when the ACTIVE version advanced since the request was submitted. `summary.deprecation_requests` carries the count.
+
 ---
 
-## `review(action, topic, key, note)`
+## `review(action, topic, key, note)` / `review(action, request_id, note)`
 
-Resolve a DRAFT knowledge entry.
+Resolve a DRAFT knowledge entry, or approve/reject a pending deprecation request.
 
 **Parameters:**
 - `action` — `"approve" | "reject" | "request_changes"`
-- `topic`, `key` — target entry
+- `topic`, `key` — target entry (required for DRAFT reviews; omit when using `request_id`)
 - `note` — mandatory reason (≥10 meaningful characters)
+- `request_id` — string from `pending().deprecation_requests[n].request_id`. When provided, `topic`/`key` are resolved from the pending request. Only `'approve'` and `'reject'` are valid for deprecation requests; `'request_changes'` returns `{ status: 'invalid_action' }`.
+
+**Approve deprecation request:**
+```json
+{ "status": "approved", "request_id": "q_c12", "topic": "auth", "key": "token-strategy",
+  "deprecated_version": 3, "deprecation_version": 4 }
+```
+**Reject deprecation request:**
+```json
+{ "status": "rejected", "request_id": "q_c12", "topic": "auth", "key": "token-strategy" }
+```
 
 **Constitutional constraint:** Claude is **never** the approving reviewer — not even for
 knowledge authored by a different identity (e.g. a different `QUORUM_AUTHOR`). All DRAFT
@@ -195,9 +220,9 @@ Use before superseding existing knowledge to understand why prior versions were 
 Deprecate knowledge permanently. Never hard-deletes — creates a `DEPRECATED` marker
 version. Requires `reason` (≥10 meaningful characters).
 
-**Requires `principal_architect` role.** If your role is lower (e.g. `senior_engineer`),
-`forget()` returns `{ status: 'forbidden', message: '...' }`. Propose the deprecation to a
-PE — they can action it from the dashboard or MCP.
+**PE/admin callers:** deprecate immediately — creates the DEPRECATED version and transitions the ACTIVE version atomically.
+
+**Non-PE callers:** `forget()` queues a deprecation request instead of deprecating immediately. Returns `{ status: 'deprecation_requested', request_id }`. A PE can approve or reject it via `review({ action, request_id, note })` or from the dashboard Pending page. One pending request per author per key — re-submitting when one is already queued returns `{ status: 'already_requested', request_id }`.
 
 Use when knowledge is definitively obsolete, not just superseded by a newer entry.
 
