@@ -12,6 +12,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 // ── Mocks (top-level — hoisted by Vitest) ─────────────────────────────────────
 
+vi.mock('../../src/config/loader.js', () => ({
+  loadConfig:       async () => ({ project: 'test', members: [], group_id: 'test-project' }),
+  stopConfigPoller: () => {},
+  getConfig: vi.fn(() => ({ project: 'test', members: [], roles: {}, domains: {}, group_id: 'test-project', is_global: false })),
+}))
+
 vi.mock('../../src/graph/client.js', () => ({
   addEpisode: vi.fn(),
   addSupersedingEpisode: vi.fn(),

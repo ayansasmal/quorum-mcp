@@ -29,7 +29,7 @@ import { v4 as uuidv4 } from 'uuid'
 import { z } from 'zod'
 import { withAuditPipeline } from '../audit/pipeline.js'
 import { detectConflict, resolveConflict, generateEnrichment, normalizeTags } from '../governance/conflict.js'
-import { enforceReasonRequired, enforceConflictPartyCannotSelfResolve } from '../governance/constitutional.js'
+import { enforceReasonRequired, enforceConflictPartyCannotSelfResolve, enforceGlobalWriteAuthority } from '../governance/constitutional.js'
 import { buildVersionRecord, buildForwardLink, buildAuditVersionImpact, hashContent } from '../governance/provenance.js'
 import { initialConfidence } from '../governance/confidence.js'
 import { resolveAuthorConfidence } from '../governance/authority.js'
@@ -42,8 +42,10 @@ import {
   incrementDomainStat,
 } from '../graph/queries.js'
 
-// ── Global namespace constant (GAP-27) ────────────────────────────────────────
-const GLOBAL_PROJECT_ID = 'global'
+// GLOBAL_PROJECT_ID constant removed in v0.4 Wave A.
+// Global catalog detection now uses getConfig()?.is_global === true so that ANY
+// project can be elevated to a global catalog, not just the hardcoded 'global' id.
+// Write authority is enforced by enforceGlobalWriteAuthority() (constitutional layer).
 
 export const schema = z.object({
   topic: z.string()
@@ -114,18 +116,12 @@ export async function handler(pg, input, identity, ctx) {
   const projectId = ctx?.projectId
   if (!projectId) throw new Error('remember: ctx.projectId is required — ensure a .quorum file exists in this workspace')
 
-  // ── GAP-27: Global namespace write guard ────────────────────────────────────
-  // The 'global' project is readable by all projects but writable only by
-  // principal_architect. Every global write enters DRAFT — no auto-activation.
-  if (projectId === GLOBAL_PROJECT_ID) {
-    if (identity?.role !== 'principal_architect') {
-      return {
-        status: 'forbidden',
-        message: `Only principal_architect role can write to the global namespace. Your role: ${identity?.role ?? 'unknown'}.`,
-        hint: 'Global knowledge is company-wide policy. Ask a principal_architect to submit or approve.',
-      }
-    }
-  }
+  // ── GAP-27 (lifted): Global catalog write authority ─────────────────────────
+  // Moved from application-level soft-return to constitutional enforcement.
+  // Any project with is_global: true is a global catalog; architect+ can write.
+  // Throws ConstitutionalViolation('GLOBAL_WRITE_AUTHORITY') on violation.
+  const isGlobalProject = getConfig()?.is_global === true
+  enforceGlobalWriteAuthority(identity, projectId, isGlobalProject)
 
   // ── Resolve a pending conflict ──────────────────────────────────────────────
   if (input.conflict_id && input.resolution) {
@@ -252,7 +248,8 @@ export async function handler(pg, input, identity, ctx) {
  */
 async function supersede(pg, input, existing, author, confidence, tags, triggeredBy, authorRole, projectId, ctx) {
   if (!projectId) throw new Error('supersede: projectId is required')
-  const isGlobal = projectId === GLOBAL_PROJECT_ID
+  // Use config flag, not a hardcoded project id, so any project can be a global catalog.
+  const isGlobal = getConfig()?.is_global === true
   const nextVersion = await getNextVersionNumber(pg, input.topic, input.key, projectId)
 
   const graphitiResult = await addSupersedingEpisode(input.content, existing.graphiti_episode_id, {
@@ -283,6 +280,7 @@ async function supersede(pg, input, existing, author, confidence, tags, triggere
     supersedesReason: input.reason,
     status: newStatus,
     projectId,
+    entityType: input.entity_type,
     agentId:    ctx?.agentId    ?? null,
     sessionId:  ctx?.sessionId  ?? null,
     authorType: ctx?.authorType ?? 'agent',
@@ -356,7 +354,8 @@ async function supersede(pg, input, existing, author, confidence, tags, triggere
  */
 async function storeFirst(pg, input, author, confidence, tags, triggeredBy, authorRole, projectId, ctx) {
   if (!projectId) throw new Error('storeFirst: projectId is required')
-  const isGlobal = projectId === GLOBAL_PROJECT_ID
+  // Use config flag, not a hardcoded project id, so any project can be a global catalog.
+  const isGlobal = getConfig()?.is_global === true
 
   const graphitiResult = await addEpisode(input.content, {
     key: `${input.topic}:${input.key}`,
@@ -388,6 +387,7 @@ async function storeFirst(pg, input, author, confidence, tags, triggeredBy, auth
     graphitiEpisodeId: graphitiResult.episode_id,
     status,
     projectId,
+    entityType: input.entity_type,
     agentId:    ctx?.agentId    ?? null,
     sessionId:  ctx?.sessionId  ?? null,
     authorType: ctx?.authorType ?? 'agent',
@@ -449,6 +449,7 @@ async function storePendingConflictCheck(pg, input, author, confidence, tags, tr
     supersedes_version: existing?.version ?? null,
     supersedes_reason: input.reason ?? null,
     projectId,
+    entityType: input.entity_type,
     agentId:    ctx?.agentId    ?? null,
     sessionId:  ctx?.sessionId  ?? null,
     authorType: ctx?.authorType ?? 'agent',
@@ -563,6 +564,7 @@ async function resolveConflictDecision(pg, input, identity, author, confidence, 
       triggeredBy: TriggeredBy.CONFLICT_RESOLUTION, auditEntryId: 'pre_pending',
       graphitiEpisodeId: episodeA.episode_id,
       projectId,
+      entityType: input.entity_type,
       agentId:    ctx?.agentId    ?? null,
       sessionId:  ctx?.sessionId  ?? null,
       authorType: ctx?.authorType ?? 'agent',
@@ -582,6 +584,7 @@ async function resolveConflictDecision(pg, input, identity, author, confidence, 
       triggeredBy: TriggeredBy.CONFLICT_RESOLUTION, auditEntryId: 'pre_pending',
       graphitiEpisodeId: episodeB.episode_id,
       projectId,
+      entityType: input.entity_type,
       agentId:    ctx?.agentId    ?? null,
       sessionId:  ctx?.sessionId  ?? null,
       authorType: ctx?.authorType ?? 'agent',

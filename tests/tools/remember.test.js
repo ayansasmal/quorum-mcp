@@ -23,6 +23,13 @@ import { ConstitutionalViolation } from '../../src/governance/constitutional.js'
 
 // ── Mocks (hoisted — must be at top level in ESM) ─────────────────────────────
 
+vi.mock('../../src/config/loader.js', () => ({
+  loadConfig:       async () => ({ project: 'test', members: [], group_id: 'test-project' }),
+  stopConfigPoller: () => {},
+  // Default: non-global project. Override per-test via vi.mocked(getConfig).mockReturnValue(...)
+  getConfig: vi.fn(() => ({ project: 'test', members: [], roles: {}, domains: {}, group_id: 'test-project', is_global: false })),
+}))
+
 vi.mock('../../src/graph/client.js', () => ({
   addEpisode: vi.fn(),
   addSupersedingEpisode: vi.fn(),
@@ -496,5 +503,63 @@ describe('remember — regression: storePendingConflictCheck uses camelCase proj
       knowledge_status: 'PENDING_CONFLICT_CHECK',
     })
     expect(result.warning).toMatch(/deferred|unavailable/i)
+  })
+})
+
+// ── v0.4: Global write authority (constitutional enforcement) ─────────────────
+
+describe('remember — global catalog write authority (v0.4)', () => {
+  afterEach(() => vi.clearAllMocks())
+
+  it('throws GLOBAL_WRITE_AUTHORITY when engineer writes to a global catalog', async () => {
+    const { getConfig } = await import('../../src/config/loader.js')
+    vi.mocked(getConfig).mockReturnValue({
+      project: 'security-standards', members: [], roles: {}, domains: {},
+      group_id: 'security-standards', is_global: true,
+    })
+
+    const { handler } = await import('../../src/tools/remember.js')
+
+    const engineerIdentity = { name: 'bob', team: 'platform', role: 'engineer', base_confidence: 0.5, method: 'git_email' }
+
+    await expect(
+      handler(
+        {},
+        { topic: 'auth', key: 'token-strategy', content: 'Some content', confidence: 0.5 },
+        engineerIdentity,
+        { projectId: 'security-standards', gatewayUrl: 'http://localhost:3001' },
+      ),
+    ).rejects.toMatchObject({
+      name: 'ConstitutionalViolation',
+      rule: 'GLOBAL_WRITE_AUTHORITY',
+    })
+  })
+
+  it('allows architect-tier role to write to a global catalog', async () => {
+    const { getCurrentVersion, insertVersion } = await import('../../src/graph/queries.js')
+    const { addEpisode } = await import('../../src/graph/client.js')
+    const { getConfig } = await import('../../src/config/loader.js')
+
+    vi.mocked(getCurrentVersion).mockResolvedValue(null)
+    vi.mocked(insertVersion).mockResolvedValue({ id: 1, version: 1 })
+    vi.mocked(addEpisode).mockResolvedValue({ episode_id: 'ep_global' })
+    vi.mocked(getConfig).mockReturnValue({
+      project: 'security-standards', members: [], roles: {}, domains: {},
+      group_id: 'security-standards', is_global: true,
+    })
+
+    const { handler } = await import('../../src/tools/remember.js')
+
+    const architectIdentity = { name: 'alice', team: 'platform', role: 'architect', base_confidence: 0.8, method: 'github_token' }
+
+    const result = await handler(
+      {},
+      { topic: 'auth', key: 'token-strategy', content: 'Global standard', confidence: 0.8 },
+      architectIdentity,
+      { projectId: 'security-standards', gatewayUrl: 'http://localhost:3001' },
+    )
+
+    // Architect writes to global catalog land as DRAFT (pending PA approval)
+    expect(result.knowledge_status).toBe('DRAFT')
   })
 })

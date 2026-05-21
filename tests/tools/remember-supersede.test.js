@@ -6,14 +6,21 @@
  * insertVersion → transitionVersionStatus pair, eliminating the race
  * window where two ACTIVE rows could coexist.
  *
- * Global writes (projectId === 'global') keep the legacy path — the old
- * ACTIVE stays until a reviewer approves the DRAFT, so no atomic transition
- * is needed.
+ * Global writes (is_global: true in project config) keep the legacy path —
+ * the old ACTIVE stays until a reviewer approves the DRAFT, so no atomic
+ * transition is needed.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 // ── Mocks (hoisted) ───────────────────────────────────────────────────────────
+
+vi.mock('../../src/config/loader.js', () => ({
+  loadConfig:       async () => ({ project: 'test', members: [], group_id: 'test-project' }),
+  stopConfigPoller: () => {},
+  // Default: non-global project. Override per-test via vi.mocked(getConfig).mockReturnValue(...)
+  getConfig: vi.fn(() => ({ project: 'test', members: [], roles: {}, domains: {}, group_id: 'test-project', is_global: false })),
+}))
 
 vi.mock('../../src/graph/client.js', () => ({
   addEpisode: vi.fn().mockResolvedValue({ episode_id: 'ep_new' }),
@@ -181,13 +188,20 @@ describe('remember — atomic supersede (non-global path)', () => {
 describe('remember — global supersede path (unchanged)', () => {
   beforeEach(async () => {
     const { getCurrentVersion, getNextVersionNumber } = await import('../../src/graph/queries.js')
+    const { getConfig } = await import('../../src/config/loader.js')
     vi.mocked(getCurrentVersion).mockResolvedValue(existingVersion)
     vi.mocked(getNextVersionNumber).mockResolvedValue(2)
+    // Override config to mark this project as a global catalog (v0.4 mechanism).
+    // The global path uses config.is_global, not a hardcoded projectId string.
+    vi.mocked(getConfig).mockReturnValue({
+      project: 'security-standards', members: [], roles: {}, domains: {},
+      group_id: 'security-standards', is_global: true,
+    })
   })
 
   afterEach(() => vi.clearAllMocks())
 
-  it('uses insertVersion (not atomicSupersede) for global namespace writes', async () => {
+  it('uses insertVersion (not atomicSupersede) for global catalog writes (is_global: true)', async () => {
     const { handler } = await import('../../src/tools/remember.js')
     const { insertVersion, transitionVersionStatus } = await import('../../src/graph/queries.js')
 
@@ -203,7 +217,7 @@ describe('remember — global supersede path (unchanged)', () => {
         reason: 'company-wide adoption of OAuth2.1',
       },
       humanIdentity,
-      { projectId: 'global', gatewayUrl: 'http://localhost:3001' },
+      { projectId: 'security-standards', gatewayUrl: 'http://localhost:3001' },
     )
 
     expect(vi.mocked(insertVersion)).toHaveBeenCalledTimes(1)
