@@ -145,7 +145,8 @@ export async function handler(pg, input, identity, ctx) {
       if (existing) {
         enforceReasonRequired(input.reason, 'remember (supersede)')
 
-        const conflictResult = await detectConflict(input.content, input.topic, input.key, domain, pg)
+        const globals = getConfig()?.globals ?? []
+        const conflictResult = await detectConflict(input.content, input.topic, input.key, domain, pg, projectId, globals)
 
         // GAP-03: Graphiti was unavailable — store as PENDING_CONFLICT_CHECK for deferred re-check
         if (conflictResult.graphiti_unavailable) {
