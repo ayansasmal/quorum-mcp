@@ -28,7 +28,12 @@ vi.mock('@modelcontextprotocol/sdk/server/mcp.js', () => ({
     constructor() {
       this.server = { listRoots: async () => ({ roots: [] }) }
     }
+    // Legacy SDK API (still used in some tests)
     tool(name, _schema, handler) {
+      ;(globalThis.__registeredHandlers ??= new Map()).set(name, handler)
+    }
+    // Current SDK API: server.registerTool(name, { inputSchema }, handler)
+    registerTool(name, _opts, handler) {
       ;(globalThis.__registeredHandlers ??= new Map()).set(name, handler)
     }
     async connect() {}
