@@ -21,6 +21,10 @@ vi.mock('../../src/graph/client.js', () => ({
   searchFacts: vi.fn(),
 }))
 
+vi.mock('../../src/config/loader.js', () => ({
+  getConfig: vi.fn(() => ({ globals: [] })),
+}))
+
 vi.mock('../../src/audit/pipeline.js', () => ({
   withAuditPipeline: vi.fn(async (_pg, _ctx, operation) => operation()),
 }))
@@ -166,19 +170,23 @@ describe('search — global project context', () => {
 // ── deduplication ─────────────────────────────────────────────────────────────
 
 describe('search — deduplication', () => {
-  it('deduplicates nodes with same uuid across project + global results', async () => {
+  it('deduplicates nodes with same uuid within project results', async () => {
     const { searchNodes, searchFacts } = await import('../../src/graph/client.js')
 
-    // First call is project search, second call is global search
-    vi.mocked(searchNodes)
-      .mockResolvedValueOnce({ nodes: [makeNode({ uuid: 'shared-id', _source: 'project' })] })
-      .mockResolvedValueOnce({ nodes: [makeNode({ uuid: 'shared-id', _source: 'global' })] })
+    // Graphiti may return the same node twice (different traversal paths).
+    // The dedup-by-uuid logic should keep only the first occurrence.
+    vi.mocked(searchNodes).mockResolvedValue({
+      nodes: [
+        makeNode({ uuid: 'shared-id' }),
+        makeNode({ uuid: 'shared-id', score: 0.8 }),  // duplicate — lower score, should be dropped
+      ],
+    })
     vi.mocked(searchFacts).mockResolvedValue({ facts: [] })
 
     const { handler } = await import('../../src/tools/search.js')
     const result = await handler(makePg(), { query: 'auth', author: 'alice' }, undefined, testCtx)
 
-    // Only one result — the duplicate (same UUID from global) should be filtered out
+    // Only one result — the duplicate UUID should be filtered out
     expect(result.results).toHaveLength(1)
   })
 })
@@ -267,5 +275,61 @@ describe('search — Graphiti rejection handling', () => {
 
     // Falls back to postgres since Graphiti returned no nodes
     expect(result.results).toHaveLength(1)
+  })
+})
+
+// ── catalog_id annotation (Wave B) ────────────────────────────────────────────
+
+describe('search — catalog_id annotation', () => {
+  it('annotates project-local results with source=project and catalog_id=null', async () => {
+    const { searchNodes, searchFacts } = await import('../../src/graph/client.js')
+    const { getConfig } = await import('../../src/config/loader.js')
+
+    vi.mocked(getConfig).mockReturnValue({ globals: [] })
+    vi.mocked(searchNodes).mockResolvedValue({ nodes: [makeNode({ uuid: 'n1' })] })
+    vi.mocked(searchFacts).mockResolvedValue({ facts: [] })
+
+    const { handler } = await import('../../src/tools/search.js')
+    const result = await handler(makePg(), { query: 'auth', author: 'alice' }, undefined, testCtx)
+
+    expect(result.results[0].source).toBe('project')
+    expect(result.results[0].catalog_id).toBeNull()
+  })
+
+  it('annotates global catalog results with source=global and catalog_id=group_id', async () => {
+    const { searchNodes, searchFacts } = await import('../../src/graph/client.js')
+    const { getConfig } = await import('../../src/config/loader.js')
+
+    vi.mocked(getConfig).mockReturnValue({ globals: ['security-standards'] })
+    // First call: project (no nodes), second call: global catalog (one node)
+    vi.mocked(searchNodes)
+      .mockResolvedValueOnce({ nodes: [] })
+      .mockResolvedValueOnce({ nodes: [makeNode({ uuid: 'global-n1', name: 'security:tls' })] })
+    vi.mocked(searchFacts).mockResolvedValue({ facts: [] })
+
+    const { handler } = await import('../../src/tools/search.js')
+    const result = await handler(makePg(), { query: 'tls', author: 'alice' }, undefined, testCtx)
+
+    expect(result.results[0].source).toBe('global')
+    expect(result.results[0].catalog_id).toBe('security-standards')
+  })
+
+  it('project wins deduplication over global when same uuid appears in both', async () => {
+    const { searchNodes, searchFacts } = await import('../../src/graph/client.js')
+    const { getConfig } = await import('../../src/config/loader.js')
+
+    vi.mocked(getConfig).mockReturnValue({ globals: ['security-standards'] })
+    vi.mocked(searchNodes)
+      .mockResolvedValueOnce({ nodes: [makeNode({ uuid: 'shared-id' })] })           // project
+      .mockResolvedValueOnce({ nodes: [makeNode({ uuid: 'shared-id', score: 0.95 })] }) // global (higher score, but deduped)
+    vi.mocked(searchFacts).mockResolvedValue({ facts: [] })
+
+    const { handler } = await import('../../src/tools/search.js')
+    const result = await handler(makePg(), { query: 'auth', author: 'alice' }, undefined, testCtx)
+
+    // Only one result; the project version wins (project is listed first)
+    expect(result.results).toHaveLength(1)
+    expect(result.results[0].source).toBe('project')
+    expect(result.results[0].catalog_id).toBeNull()
   })
 })
