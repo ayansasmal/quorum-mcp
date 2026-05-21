@@ -1,6 +1,6 @@
 # quorum-mcp
 
-**Governed engineering memory for Claude Code and AI agents.**
+**Governed engineering and business memory for Claude Code and AI agents.**
 
 [![npm](https://img.shields.io/npm/v/@as-quorum/mcp?label=%40as-quorum%2Fmcp&color=cb0000&logo=npm)](https://www.npmjs.com/package/@as-quorum/mcp)
 [![Tests](https://img.shields.io/badge/tests-559%20passing-brightgreen?logo=vitest&logoColor=white)](https://github.com/ayansasmal/quorum-mcp)
@@ -11,7 +11,13 @@
 [![Gateway](https://img.shields.io/badge/requires-Quorum%20Gateway-orange)](https://github.com/ayansasmal/quorum)
 [![License](https://img.shields.io/badge/license-ELv2-blue)](LICENSE)
 
-`quorum-mcp` is the MCP server package for [Quorum](https://github.com/ayansasmal/quorum) — a temporal knowledge graph that gives Claude Code and multi-agent systems a shared, self-evolving memory of engineering decisions, patterns, and institutional knowledge. It enforces governance: conflict detection, authority weighting, human-in-the-loop approval, and a tamper-evident audit trail.
+`quorum-mcp` is the MCP server package for [Quorum](https://github.com/ayansasmal/quorum) — a temporal knowledge graph that gives Claude Code and multi-agent systems a shared, self-evolving memory of engineering decisions, business requirements, patterns, and institutional knowledge. It enforces governance: conflict detection, authority weighting, human-in-the-loop approval, and a tamper-evident audit trail.
+
+Quorum stores two complementary types of knowledge:
+- **Engineering knowledge** — the technical *why* and *how*: architectural decisions, patterns, constraints, runbooks
+- **Business knowledge** — the product *why* and *when*: feature requirements, business rules, compliance constraints
+
+Both are governed identically and accessible to anyone on the team via Claude.
 
 > **Requires a running Quorum gateway.** This package is the client side only. The gateway + dashboard live in the [`quorum`](https://github.com/ayansasmal/quorum) repo.
 
@@ -20,7 +26,7 @@
 ## How it works
 
 ```
-Claude Code / AI Agents
+Claude Code / AI Agents / PMs / BAs
         │  MCP (stdio)
         ▼
   quorum-mcp  ──── HTTP ────►  Quorum Gateway (:3001)
@@ -31,7 +37,7 @@ Claude Code / AI Agents
                                 FalkorDB
 ```
 
-The MCP server exposes 12 tools to Claude Code. All persistence goes through the Quorum gateway over HTTP — this package never touches a database directly.
+The MCP server exposes 12 tools to Claude. All persistence goes through the Quorum gateway over HTTP — this package never touches a database directly.
 
 **Identity model (v0.3):** the JWT carries only `{ sub, is_admin }`. The active project is sent as the `X-Quorum-Project` header on every request. `resolveCtx()` resolves this from the `.quorum` file in the project root and threads it through all tool calls.
 
@@ -79,7 +85,7 @@ quorum init        # creates .quorum file with project group_id
 
 | Tool | What it does |
 |------|-------------|
-| `remember` | Store a decision, pattern, or constraint — versioned, with provenance |
+| `remember` | Store a decision, pattern, constraint, or requirement — versioned, with provenance |
 | `recall` | Fetch current version of a specific knowledge entry; XML output for Claude context |
 | `search` | Semantic search across the knowledge graph; PG ILIKE fallback if Graphiti empty |
 | `reflect` | Extract and store learnable knowledge from a completed task (stored as DRAFT) |
@@ -98,8 +104,8 @@ quorum init        # creates .quorum file with project group_id
 | Field | Constraint |
 |-------|-----------|
 | `content` | Max 500 chars, plain text — no `<` or `>` characters |
-| `topic` | Kebab-case slug, max 60 chars (e.g. `auth`, `db-layer`) |
-| `key` | Kebab-case slug, max 80 chars (e.g. `token-strategy`) |
+| `topic` | Kebab-case slug, max 60 chars (e.g. `auth`, `db-layer`, `product`, `compliance`) |
+| `key` | Kebab-case slug, max 80 chars (e.g. `token-strategy`, `guest-checkout-requirement`) |
 | `tags` | Max 10 tags, each kebab-case, max 40 chars |
 | `reason` | Min 10 chars, max 500 chars, plain text |
 | `confidence` | Float 0.5–1.0 |
@@ -121,7 +127,7 @@ These limits are enforced at the Zod layer (MCP) and the gateway validation laye
 
 ## Install the Quorum skill and hooks
 
-The skill and hooks make Quorum an always-present part of your engineering SDLC — surfacing pending items at session start, recalling context before decisions, capturing knowledge at task end, and prompting `reflect()` before commits.
+The skill and hooks make Quorum an always-present part of your team's SDLC — surfacing pending items at session start, recalling context before decisions, capturing knowledge at task end, and prompting `reflect()` before commits.
 
 ```bash
 npx @as-quorum/mcp install

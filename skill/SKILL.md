@@ -1,18 +1,24 @@
 ---
 name: quorum
 description: >
-  ALWAYS invoke at session start for any engineering task in a
+  ALWAYS invoke at session start for any engineering or business task in a
   Quorum-connected project (.quorum file present). Primary knowledge
   source — consult before any implementation decision, architectural
-  choice, or code change. Skip only for pure read sessions with no
-  decisions made.
+  choice, product requirement, or code change. Skip only for pure read
+  sessions with no decisions made.
 ---
 
 # Quorum Skill
 
-Quorum is a **governed temporal knowledge graph** for engineering teams. It stores
-decisions, patterns, constraints, and runbooks with full versioning, conflict detection,
+Quorum is a **governed temporal knowledge graph** for engineering and cross-functional teams. It stores
+decisions, patterns, constraints, runbooks, and business requirements with full versioning, conflict detection,
 authority weighting, and a tamper-evident audit trail.
+
+Quorum stores two complementary types of knowledge:
+- **Engineering knowledge** — the technical *why* and *how*: architectural decisions, patterns, constraints, runbooks
+- **Business knowledge** — the product *why* and *when*: feature requirements, business rules, compliance constraints
+
+Anyone on the team — engineers, PMs, BAs, compliance officers — uses Claude to interact with Quorum.
 
 **Your responsibilities — in priority order:**
 1. Surface pending decisions at session start — non-negotiable
@@ -65,7 +71,7 @@ pending()    ← returns conflict_briefs and draft_reviews — handle them diffe
 ```
 
 | Return type | How to handle |
-|-------------|--------------|
+|-------------|---------------|
 | `conflict_briefs` — unresolved conflicts | **Block on resolution before writing any code.** Present each conflict and get human decision. See Conflict Resolution section. |
 | `draft_reviews` — DRAFTs awaiting approval | **Do not block.** Note them: *"N DRAFT entries await your review at http://localhost:3002/pending."* Then continue. |
 
@@ -87,7 +93,15 @@ Read the task and infer all domains involved. Pull knowledge for each upfront:
 | cache, Redis, CDN, TTL, invalidation | `search("caching")` |
 | monitoring, alerts, metrics, SLO, SLA, observability | `search("monitoring")` |
 | queue, worker, job, async, event-driven, consumer | `search("async")` |
+| product, feature, requirement, user story, roadmap | `search("product")` |
+| compliance, regulation, GDPR, legal, privacy, policy | `search("compliance")` |
 | **No keyword matches** | `search("<raw task description literally>")` |
+
+**Before removing or significantly changing any feature**, always check for product requirements:
+```
+search("<feature name>", domain="product,compliance")
+```
+A product requirement may exist that governs why the feature exists.
 
 ---
 
@@ -113,6 +127,7 @@ Examples:
 - Writing a database query → `search("db connection")` → `recall("db", "connection-pooling")`
 - Designing an API response → `search("api errors")` → `recall("api", "error-standards")`
 - Handling a retry → `search("retry backoff")` → `recall("infra", "retry-strategy")`
+- Modifying checkout → `search("checkout")` → `recall("product", "guest-checkout-requirement")`
 
 **If recalled knowledge contradicts what you were about to do** → stop, surface the
 conflict to the human, do not silently override.
@@ -140,7 +155,7 @@ infra). For all other files, apply judgment.
 **Reading recalled entries — act on these signals:**
 
 | Signal in recall response | What to do |
-|--------------------------|-----------|
+|--------------------------|------------|
 | `confidence < 0.60` | Treat as hypothesis, not constraint. Flag to human before applying. |
 | `status: SUPERSEDED` | Fetch the ACTIVE version — never apply a superseded entry. |
 | `triggered_by: reflect` + `status: DRAFT` | Not yet human-approved. Verify with human before using as a hard constraint. |
@@ -157,21 +172,30 @@ reversals — superseding blindly can undo months of governed decisions.
 
 ---
 
-### You discover a new constraint
+### You discover a new constraint or requirement
 
 > **Content constraints apply** — content must be ≤ 500 chars with no HTML (`<` `>` forbidden); topic and key must be kebab-case slugs; reason (for supersede/promote) must be ≥ 10 chars. See `references/knowledge-guidelines.md` § Content Constraints for the full table.
 
 Call `remember()` **immediately** — do not wait for the task to finish.
-Constraints discovered mid-task are the most valuable kind; they get lost otherwise.
+Constraints and requirements discovered mid-task are the most valuable kind; they get lost otherwise.
 
 **Key naming:** kebab-case noun-phrase, specific enough to be unique within the topic.
-Good: `connection-pool-size`. Bad: `db_stuff`, `connectionPoolingDecision`, `config`.
+Good: `connection-pool-size`, `guest-checkout-requirement`. Bad: `db_stuff`, `requirement1`.
 
 ```javascript
+// Engineering constraint
 remember("domain", "key", "constraint statement", {
   confidence: 0.80,
   tags: ["domain", "constraint-type", "affected-component"],
   reason: "discovered while implementing X"
+})
+
+// Business requirement
+remember("product", "key", "requirement statement — why it exists, who it serves, when it applies", {
+  entity_type: "Requirement",
+  confidence: 0.80,
+  tags: ["product", "feature-name"],
+  reason: "stated by product owner / captured from PRD"
 })
 ```
 
@@ -201,12 +225,13 @@ This creates a conflict for human review. Do not silently override existing know
 
 ### Sensitive domains — pull everything, not just one key
 
-In `auth`, `payments`, `infra`, `security` domains: do a full domain scan before touching anything:
+In `auth`, `payments`, `infra`, `security`, `compliance` domains: do a full domain scan before touching anything:
 
 ```
-search("auth")      ← all auth patterns + constraints
-search("payments")  ← all payment rules
-search("security")  ← all security constraints
+search("auth")        ← all auth patterns + constraints
+search("payments")    ← all payment rules
+search("security")    ← all security constraints
+search("compliance")  ← all regulatory and legal constraints
 ```
 
 Sensitive domain violations are the costliest to fix after the fact.
@@ -215,15 +240,16 @@ Sensitive domain violations are the costliest to fix after the fact.
 
 ## After Task — Reflect and Capture
 
-Ask: *"What did I decide, discover, or reinforce that a future engineer should know?"*
+Ask: *"What did I decide, discover, or reinforce that a future engineer or product owner should know?"*
 
 If the answer is anything → call `reflect()` once:
 
 ```javascript
 reflect("concise task summary — what was built and why", {
-  decisions: ["decision 1 with rationale", "decision 2 with rationale"],
-  patterns:  ["pattern used and why it fits here"],
-  constraints: ["constraint discovered or confirmed"]
+  decisions:    ["decision 1 with rationale", "decision 2 with rationale"],
+  patterns:     ["pattern used and why it fits here"],
+  constraints:  ["constraint discovered or confirmed"],
+  requirements: ["business or product requirement captured"]
 })
 ```
 
@@ -233,7 +259,7 @@ reflect("concise task summary — what was built and why", {
 - If any entry returned `stored_pending_conflict_check` → tell the human: *"Conflict check deferred for N entries — review at /pending once Graphiti is back."*
 
 **Skip `reflect()` entirely** for: pure read sessions, abandoned tasks, sessions
-where no real architectural or design decisions were made. Over-extraction degrades
+where no real architectural, design, or product decisions were made. Over-extraction degrades
 signal quality. See [`references/knowledge-guidelines.md`](references/knowledge-guidelines.md).
 
 ---
@@ -374,8 +400,9 @@ knowledge that already exists, rather than starting from zero.
 
 Quorum's graph is only as good as what gets into it. Most institutional knowledge
 lives in files that already exist — `CLAUDE.md`, `MEMORY.md`, README sections,
-ADRs, code comments, test names, config values. This section tells you when and
-how to scan for it and surface candidates for human confirmation before storing.
+ADRs, code comments, test names, config values, PRDs, Jira tickets. This section
+tells you when and how to scan for it and surface candidates for human confirmation
+before storing.
 
 **Golden rule: always `search()` before proposing. Never suggest storing something
 that is already in Quorum.**
@@ -392,7 +419,7 @@ that is already in Quorum.**
 | You open a file with dense comments or ADR-style notes | That file |
 | You read a long test file | Extract business rules from test names + assertions |
 | You read a config file (limits, thresholds, pool sizes) | Extract constraints |
-| Human pastes a decision, email, or Slack thread | Extract immediately |
+| Human pastes a decision, email, Slack thread, or PRD excerpt | Extract immediately |
 
 ---
 
@@ -409,6 +436,16 @@ These files are the richest source. Read them fully and extract:
 cat CLAUDE.md .claude/CLAUDE.md 2>/dev/null
 cat ~/.claude/projects/$(echo $PWD | tr '/' '-')/memory/MEMORY.md 2>/dev/null
 ```
+
+#### Product requirements and business rules
+Look for anywhere the *why* of a feature is stated:
+- PRD documents or feature specs in `docs/`
+- Jira ticket descriptions pasted into conversation
+- Acceptance criteria in test files
+- Comments that say "this exists because..." or "required by..."
+- Feature flags that encode a product decision
+
+Store these as `entity_type: "Requirement"` with topic `product` or `compliance`.
 
 #### `README.md` / `docs/*.md`
 Look for:
@@ -430,6 +467,7 @@ Test names encode business rules. Scan test `describe`/`it` blocks for:
 - "should reject X when Y" → constraint
 - "should use X for Z" → pattern
 - "must not allow X" → hard constraint
+- "returns X when user is guest" → product requirement
 
 ```bash
 grep -rn "it(\|test(\|describe(" tests/ --include="*.test.*" -A 1
@@ -461,7 +499,7 @@ Look for commits that explain *why* a change was made, not just *what* changed.
 Never ask the human to confirm one entry at a time. Batch everything you found,
 deduplicate against existing Quorum knowledge, then present a numbered list:
 
-> **Quorum discovery — I found 6 knowledge candidates in this project.**
+> **Quorum discovery — I found 7 knowledge candidates in this project.**
 > Please confirm which to store (reply with the numbers, e.g. "1 3 5", or "all" / "none"):
 >
 > 1. **api:error-standards** *(Pattern, confidence 0.80)*
@@ -472,14 +510,13 @@ deduplicate against existing Quorum knowledge, then present a numbered list:
 >    "PostgreSQL pool size: 10 per service instance, max 100 total across all instances"
 >    *Source: .env.example + docker-compose.yml*
 >
-> 3. **infra:retry-strategy** *(Pattern, confidence 0.75)*
->    "Exponential backoff with jitter: base 1s, max 30s, max 3 retries, ±20% jitter"
->    *Source: src/utils/retry.js comment block*
+> 3. **product:guest-checkout-requirement** *(Requirement, confidence 0.85)*
+>    "Guest checkout must remain available. Conversion data shows 40% abandonment on mandatory registration."
+>    *Source: docs/checkout-prd.md section 3*
 >
-> 4. **auth:token-strategy** *(Decision, confidence 0.80)*
->    "JWT for Lambda-based services; session tokens for ECS internal services"
->    *Source: CLAUDE.md line 8 — already in Quorum? → search result: YES — skip*
->    ⚠️ Already in Quorum — excluded from list
+> 4. **compliance:gdpr-data-residency** *(Requirement, confidence 0.90)*
+>    "All EU user data must remain in eu-west-1. Required for GDPR compliance with enterprise customers."
+>    *Source: docs/legal/data-residency.md*
 
 Once the human replies, store the approved ones:
 
@@ -507,10 +544,11 @@ Even outside a full scan, keep a passive eye open:
 | A function with a surprising limit (timeout, retry, size) | Propose storing the constraint |
 | An error message that reveals a hard constraint | Propose storing it immediately |
 | A pattern repeated 3+ times with no Quorum entry | Propose storing the pattern |
+| A feature being removed with no product requirement check | Run `search("<feature name>", domain="product,compliance")` first |
 | A deprecated approach still present in old code | `search()` to find the Quorum entry → `history()` to check what depends on it → propose: *"This approach appears obsolete. The Quorum entry `topic:key` is still ACTIVE. Want me to deprecate it with `forget()`?"* |
 
 For all except deprecated approaches: one sentence, low friction. Human says yes or no.
-*"I noticed a constraint/pattern/decision here that isn't in Quorum — want me to add it?"*
+*"I noticed a constraint/pattern/requirement here that isn't in Quorum — want me to add it?"*
 
 ---
 
@@ -519,7 +557,7 @@ For all except deprecated approaches: one sentence, low friction. Human says yes
 Violations are **rejected**, not warned:
 
 | Rule | What to do instead |
-|------|--------------------|
+|------|-----------------|
 | No hard delete | `forget(topic, key, reason)` — creates DEPRECATED version |
 | Audit is append-only | Never attempt to edit or delete audit entries |
 | Reason required (≥10 chars) | Always provide a meaningful reason for supersede/deprecate |
@@ -555,6 +593,13 @@ remember("topic", "key", "content", {
   tags: ["domain", "type", "component"],         ← cross-domain search hooks
   reason: "why this matters"
 })
+# Business requirement
+remember("product", "key", "requirement", {
+  entity_type: "Requirement",
+  confidence: 0.85,
+  tags: ["product", "feature-name"],
+  reason: "stated by product owner"
+})
 # → if stored_pending_conflict_check → warn human, Graphiti unavailable
 
 # Resolve conflict (conflict_id from pending() or conflict_detected response)
@@ -566,9 +611,10 @@ remember("topic", "key", "resolved content", {
 
 # Post-task
 reflect("what was built and why", {
-  decisions: ["..."],
-  patterns: ["..."],
-  constraints: ["..."]
+  decisions:    ["..."],
+  patterns:     ["..."],
+  constraints:  ["..."],
+  requirements: ["business or product requirement captured"]
 })
 # → if conflict_detected in response → resolve before closing session
 # → if stored_pending_conflict_check → warn human, Graphiti unavailable
@@ -606,7 +652,7 @@ and continue without blocking. Never fail silently.
 ## Confidence Guidelines
 
 | Situation | Confidence |
-|-----------|-----------|
+|-----------|------------|
 | Established, documented decision — high certainty | 0.90–0.95 |
 | Strong pattern — team follows this consistently | 0.80–0.85 |
 | Working assumption — likely correct, not yet verified | 0.65–0.75 |
@@ -616,7 +662,7 @@ and continue without blocking. Never fail silently.
 **For discovered knowledge** (source may be stale — use lower starting confidence):
 
 | Discovery source | Confidence |
-|-----------------|-----------|
+|-----------------|------------|
 | CLAUDE.md / MEMORY.md — explicit decision | 0.80 |
 | README / docs — documented pattern | 0.75 |
 | Code comment — WHY-style explanation | 0.70 |
