@@ -22,6 +22,7 @@ vi.mock('../../src/graph/client.js', () => ({
   ping: vi.fn(),
   BLOCKED_METHODS: new Set(['delete_episode', 'delete_entity', 'purge']),
   isMethodBlocked: vi.fn(),
+  normalizeGroupId: vi.fn((id) => (typeof id === 'string' ? id.replace(/-/g, '_') : id)),
 }))
 
 vi.mock('../../src/config/loader.js', () => ({
@@ -264,5 +265,61 @@ describe('generateEnrichment', () => {
 
     expect(result.possible_split).toBe(true)
     expect(result.split_suggestion).toBe('scope by service')
+  })
+})
+
+// ── detectConflict — group_id scoping (Wave B) ────────────────────────────────
+
+describe('detectConflict — groupIds scoping', () => {
+  afterEach(() => vi.clearAllMocks())
+
+  it('calls searchNodes without groupIds when projectId is null (backward compat)', async () => {
+    const { searchNodes } = await import('../../src/graph/client.js')
+    vi.mocked(searchNodes).mockResolvedValue({ nodes: [] })
+
+    const { detectConflict } = await import('../../src/governance/conflict.js')
+    await detectConflict('content', 'auth', 'key', null, null)
+
+    expect(searchNodes).toHaveBeenCalledWith(
+      'content',
+      expect.not.objectContaining({ groupIds: expect.anything() }),
+    )
+  })
+
+  it('calls searchNodes with [projectId] when projectId is set and no globals', async () => {
+    const { searchNodes } = await import('../../src/graph/client.js')
+    vi.mocked(searchNodes).mockResolvedValue({ nodes: [] })
+
+    const { detectConflict } = await import('../../src/governance/conflict.js')
+    await detectConflict('content', 'auth', 'key', null, null, 'payments-service', [])
+
+    expect(searchNodes).toHaveBeenCalledWith(
+      'content',
+      expect.objectContaining({ groupIds: ['payments_service'] }),
+    )
+  })
+
+  it('calls searchNodes with [projectId, ...globals] when both are set', async () => {
+    const { searchNodes } = await import('../../src/graph/client.js')
+    vi.mocked(searchNodes).mockResolvedValue({ nodes: [] })
+
+    const { detectConflict } = await import('../../src/governance/conflict.js')
+    await detectConflict('content', 'auth', 'key', null, null, 'payments-service', ['security-standards', 'payments-compliance'])
+
+    expect(searchNodes).toHaveBeenCalledWith(
+      'content',
+      expect.objectContaining({ groupIds: ['payments_service', 'security_standards', 'payments_compliance'] }),
+    )
+  })
+
+  it('normalizes hyphens to underscores in all group IDs', async () => {
+    const { searchNodes } = await import('../../src/graph/client.js')
+    vi.mocked(searchNodes).mockResolvedValue({ nodes: [] })
+
+    const { detectConflict } = await import('../../src/governance/conflict.js')
+    await detectConflict('content', 'auth', 'key', null, null, 'my-project', ['org-standards'])
+
+    const call = vi.mocked(searchNodes).mock.calls[0][1]
+    expect(call.groupIds).toEqual(['my_project', 'org_standards'])
   })
 })
