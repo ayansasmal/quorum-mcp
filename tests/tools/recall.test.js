@@ -36,6 +36,10 @@ vi.mock('../../src/audit/pipeline.js', () => ({
   }),
 }))
 
+vi.mock('../../src/config/loader.js', () => ({
+  getConfig: vi.fn(() => ({ globals: [] })),
+}))
+
 const testCtx = { projectId: 'test-project', gatewayUrl: 'http://localhost:3001' }
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -325,5 +329,77 @@ describe('recall — regression: version.summary used for XML body (Bug D)', () 
 
     expect(result).toContain('<quorum_memory')
     expect(result).toContain('</quorum_memory>')
+  })
+})
+
+// ── globals fallback + catalog_id (Wave B) ────────────────────────────────────
+
+describe('recall — global catalog fallback', () => {
+  afterEach(() => vi.clearAllMocks())
+
+  it('falls back to first linked global catalog when project has no entry', async () => {
+    const { getCurrentVersion } = await import('../../src/graph/queries.js')
+    const { getConfig } = await import('../../src/config/loader.js')
+
+    vi.mocked(getConfig).mockReturnValue({ globals: ['security-standards', 'org-base'] })
+    // Project: not found; first catalog: found
+    vi.mocked(getCurrentVersion)
+      .mockResolvedValueOnce(null)                      // project lookup
+      .mockResolvedValueOnce(makeVersion({ topic: 'security', key: 'tls', author: 'pa' }))  // security-standards
+
+    const { handler } = await import('../../src/tools/recall.js')
+    const result = await handler({}, { topic: 'security', key: 'tls' }, undefined, testCtx)
+
+    expect(result).toContain('source="global"')
+    expect(result).toContain('catalog_id="security-standards"')
+    // Only called twice: project + first catalog (second catalog not needed)
+    expect(vi.mocked(getCurrentVersion)).toHaveBeenCalledTimes(2)
+  })
+
+  it('tries all linked catalogs before returning not_found', async () => {
+    const { getCurrentVersion } = await import('../../src/graph/queries.js')
+    const { getConfig } = await import('../../src/config/loader.js')
+
+    vi.mocked(getConfig).mockReturnValue({ globals: ['catalog-a', 'catalog-b'] })
+    vi.mocked(getCurrentVersion).mockResolvedValue(null)  // all lookups fail
+
+    const { handler } = await import('../../src/tools/recall.js')
+    const result = await handler({}, { topic: 'auth', key: 'missing-key' }, undefined, testCtx)
+
+    expect(result).toEqual({ status: 'not_found', topic: 'auth', key: 'missing-key' })
+    // 3 calls: project + catalog-a + catalog-b
+    expect(vi.mocked(getCurrentVersion)).toHaveBeenCalledTimes(3)
+  })
+
+  it('annotates project-local results with source=project and empty catalog_id', async () => {
+    const { getCurrentVersion } = await import('../../src/graph/queries.js')
+    const { getConfig } = await import('../../src/config/loader.js')
+
+    vi.mocked(getConfig).mockReturnValue({ globals: ['security-standards'] })
+    vi.mocked(getCurrentVersion).mockResolvedValueOnce(makeVersion())  // found in project
+
+    const { handler } = await import('../../src/tools/recall.js')
+    const result = await handler({}, { topic: 'auth', key: 'token-strategy' }, undefined, testCtx)
+
+    expect(result).toContain('source="project"')
+    expect(result).toContain('catalog_id=""')
+    // Only 1 call — found in project, globals not needed
+    expect(vi.mocked(getCurrentVersion)).toHaveBeenCalledTimes(1)
+  })
+
+  it('includes catalog attribution comment in XML for global entries', async () => {
+    const { getCurrentVersion } = await import('../../src/graph/queries.js')
+    const { getConfig } = await import('../../src/config/loader.js')
+
+    vi.mocked(getConfig).mockReturnValue({ globals: ['security-standards'] })
+    vi.mocked(getCurrentVersion)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(makeVersion({ topic: 'security', key: 'tls' }))
+
+    const { handler } = await import('../../src/tools/recall.js')
+    const result = await handler({}, { topic: 'security', key: 'tls' }, undefined, testCtx)
+
+    expect(result).toContain("global catalog 'security-standards'")
+    expect(result).toContain('readonly from this project')
   })
 })

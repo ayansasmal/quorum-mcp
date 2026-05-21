@@ -15,6 +15,7 @@ import { z } from 'zod'
 import { withAuditPipeline } from '../audit/pipeline.js'
 import { getCurrentVersion, getVersionHistory, getVersionAtDate, getSpecificVersion, incrementDomainStat } from '../graph/queries.js'
 import { buildAuditVersionImpact } from '../governance/provenance.js'
+import { getConfig } from '../config/loader.js'
 
 const FRESHNESS_DAYS = 7
 
@@ -95,14 +96,22 @@ export async function handler(pg, input, identity, ctx) {
         }
       }
 
-      // ── Default: ACTIVE version with global fallback (GAP-27) ─────────────
-      let version = await getCurrentVersion(pg, input.topic, input.key, projectId)
-      let fromGlobal = false
+      // ── Default: ACTIVE version with global catalog fallback (Wave B) ──────
+      // getConfig() throws when config is not loaded — fall back to empty array
+      // so recall remains project-scoped (safe backward-compat default).
+      let globals = []
+      try { globals = getConfig()?.globals ?? [] } catch { /* config not loaded */ }
 
-      // If no project-local result and we are not already in global, fall through
-      if (!version && projectId !== 'global') {
-        version = await getCurrentVersion(pg, input.topic, input.key, 'global')
-        if (version) fromGlobal = true
+      let version = await getCurrentVersion(pg, input.topic, input.key, projectId)
+      let fromCatalogId = null  // group_id of the catalog this was found in; null = project-local
+
+      // If no project-local result, walk linked global catalogs in order.
+      // First catalog to have an ACTIVE version wins.
+      if (!version) {
+        for (const catalogId of globals) {
+          version = await getCurrentVersion(pg, input.topic, input.key, catalogId)
+          if (version) { fromCatalogId = catalogId; break }
+        }
       }
 
       if (!version) return { result: { status: 'not_found', topic: input.topic, key: input.key }, versionImpact: buildAuditVersionImpact([], []) }
@@ -116,7 +125,7 @@ export async function handler(pg, input, identity, ctx) {
       }).catch(() => {})
 
       return {
-        result: formatVersion(version, { fromGlobal }),
+        result: formatVersion(version, { catalogId: fromCatalogId }),
         versionImpact: buildAuditVersionImpact([], []),
       }
     },
@@ -130,19 +139,20 @@ export async function handler(pg, input, identity, ctx) {
 /**
  * Format a single version as XML for Claude context injection.
  * @param {Record<string, unknown>} version
- * @param {{ pointInTime?: string, explicit?: boolean, fromGlobal?: boolean }} opts
+ * @param {{ pointInTime?: string, explicit?: boolean, catalogId?: string | null }} opts
  * @returns {string}
  */
 function formatVersion(version, opts) {
   const daysSince = (Date.now() - new Date(version.created_at).getTime()) / (1000 * 60 * 60 * 24)
   const isRecent = daysSince < FRESHNESS_DAYS
   const isSuperseded = version.status === 'SUPERSEDED'
-  const source = opts.fromGlobal ? 'global' : 'project'
+  const source = opts.catalogId ? 'global' : 'project'
+  const catalogId = opts.catalogId ?? ''
 
-  let xml = `<quorum_memory topic="${escapeXml(version.topic)}" key="${escapeXml(version.key)}" version="${escapeXml(version.version)}" status="${escapeXml(version.status)}" author="${escapeXml(version.author)}" updated="${formatDate(version.created_at)}" triggered_by="${escapeXml(version.triggered_by)}" source="${source}">`
+  let xml = `<quorum_memory topic="${escapeXml(version.topic)}" key="${escapeXml(version.key)}" version="${escapeXml(version.version)}" status="${escapeXml(version.status)}" author="${escapeXml(version.author)}" updated="${formatDate(version.created_at)}" triggered_by="${escapeXml(version.triggered_by)}" source="${source}" catalog_id="${escapeXml(catalogId)}">`
 
-  if (opts.fromGlobal) {
-    xml += `\n  <!-- ℹ️  Sourced from global namespace — company-wide policy, readonly from this project -->`
+  if (opts.catalogId) {
+    xml += `\n  <!-- ℹ️  Sourced from global catalog '${escapeXml(opts.catalogId)}' — org-wide standard, readonly from this project -->`
   }
 
   if (opts.pointInTime) {
