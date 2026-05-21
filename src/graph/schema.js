@@ -1,7 +1,12 @@
 /**
  * Quorum entity and edge type definitions for Graphiti.
  * Passed as hints to Graphiti's add_episode so LLM extraction
- * uses engineering-domain labels rather than generic ones.
+ * uses domain labels rather than generic ones.
+ *
+ * Quorum stores two complementary types of knowledge:
+ *   Engineering knowledge — architectural decisions, patterns, constraints, runbooks
+ *   Business knowledge   — product requirements, business rules, compliance constraints
+ * Both are governed identically: authored, versioned, conflict-detected, audited.
  */
 
 /** @type {Record<string, {description: string, properties: string[]}>} */
@@ -23,8 +28,8 @@ export const QuorumEntityTypes = {
     properties: ['steps', 'triggers', 'rollback', 'domain'],
   },
   Requirement: {
-    description: 'A business or technical requirement',
-    properties: ['acceptance_criteria', 'priority', 'source', 'domain'],
+    description: 'A business or product requirement — why a feature exists, who it serves, and when it applies. Use for product decisions, compliance constraints, and regulatory rules.',
+    properties: ['acceptance_criteria', 'priority', 'source', 'business_owner', 'domain'],
   },
 }
 
