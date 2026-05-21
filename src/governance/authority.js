@@ -18,6 +18,11 @@
  *   When a caller-provided confidence is below the role's base_confidence floor,
  *   the floor is used instead. Spoofing is architecturally impossible — author
  *   is resolved server-side, never accepted from tool input.
+ *
+ * Business roles (added alongside engineering roles):
+ *   product_owner      — authority over product requirements and feature decisions
+ *   business_analyst   — captures and refines business requirements
+ *   compliance_officer — authority over compliance and regulatory constraints
  */
 
 import { getConfig } from '../config/loader.js'
@@ -27,11 +32,23 @@ const AUTHORITY_THRESHOLD = parseFloat(process.env.QUORUM_AUTHORITY_THRESHOLD ??
 
 /** Default role scores — overridable per project via governance.authority.role_scores */
 const DEFAULT_ROLE_SCORES = {
+  // Engineering roles
   engineer:             0.50,
   senior_engineer:      0.70,
   tech_lead:            0.70,
   architect:            0.80,
   principal_architect:  1.00,
+  // Business roles
+  business_analyst:     0.65,
+  product_owner:        0.85,
+  compliance_officer:   0.90,
+  // v0.4: Executive roles — read-only consumers of portfolio intelligence.
+  // Scored so their occasional knowledge contributions are weighted appropriately.
+  // Executive roles are EXCLUDED from deviation governance actions
+  // (enforceDeviationActionAuthority blocks them from accept/deny/defer).
+  director:             0.75,
+  vp_engineering:       0.75,
+  group_executive:      0.70,
 }
 
 /** Default formula weights — overridable via governance.authority.weights */
@@ -46,13 +63,32 @@ const DEFAULT_WEIGHTS = {
 /**
  * Role tiers used by the gate. An entry authored by a LOWER tier can never
  * auto-supersede one authored by a HIGHER tier.
+ *
+ * Engineering tiers:  engineer(1) < senior/tech_lead(2) < architect(3) < principal_architect(4)
+ * Business tiers:     business_analyst(2) < product_owner(3) / compliance_officer(3)
+ * Business roles are peer-tiered with engineering architects so that a product
+ * owner's requirement cannot be silently overridden by a junior engineer.
+ *
+ * v0.4 Executive tiers: director/vp_engineering/group_executive at tier 3.
+ * Peer-tiered with architects so their entries survive junior-engineer supersession.
+ * Excluded from deviation governance (enforceDeviationActionAuthority) — they are
+ * portfolio consumers, not governance actors.
  */
 const ROLE_TIER = {
+  // Engineering roles
   engineer:             1,
   senior_engineer:      2,
   tech_lead:            2,
   architect:            3,
   principal_architect:  4,
+  // Business roles
+  business_analyst:     2,
+  product_owner:        3,
+  compliance_officer:   3,
+  // v0.4: Executive roles
+  director:             3,
+  vp_engineering:       3,
+  group_executive:      3,
 }
 
 /**
@@ -118,10 +154,10 @@ export function calculateAuthority(episode) {
   // Net endorsement score: approved + recalled signals expertise; superseded signals over-confidence.
   // Floored at 0 so a heavily superseded author doesn't get a negative contribution.
   const dtr = episode.domain_track_record ?? {}
-  const domainScore = Math.max(
-    0,
-    Math.log1p((dtr.approved_count ?? 0) + (dtr.recalled_count ?? 0) - (dtr.superseded_count ?? 0)) / 10,
-  )
+  // Clamp net count to ≥ -1 before log1p: log1p(x) is only real for x ≥ -1, and
+  // Math.max(0, NaN) propagates NaN rather than flooring it.
+  const netCount = Math.max(-1, (dtr.approved_count ?? 0) + (dtr.recalled_count ?? 0) - (dtr.superseded_count ?? 0))
+  const domainScore = Math.max(0, Math.log1p(netCount) / 10)
 
   return (
     confidence  * weights.confidence +
