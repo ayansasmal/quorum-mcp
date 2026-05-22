@@ -12,7 +12,7 @@ npx @as-quorum/mcp install
 
 ## Purpose
 
-MCP server that exposes 13 tools to Claude Code: `set_agent_context`, `remember`, `recall`, `search`, `reflect`, `history`, `export`, `forget`, `review`, `pending`, `authenticate`, `config_upload`, `deviate`.
+MCP server that exposes 14 tools to Claude Code: `set_agent_context`, `remember`, `recall`, `search`, `reflect`, `history`, `export`, `forget`, `review`, `pending`, `authenticate`, `config_upload`, `deviate`, `conformance`.
 
 Always communicates with a Quorum gateway over HTTP. **Never connects to PostgreSQL directly.** Default gateway URL: `http://localhost:3001` (local dev Docker stack).
 
@@ -86,6 +86,13 @@ npm run test:constitutional  # Layer 1 only (blocking CI gate)
 - `src/tools/pending.js`: extended response shape with `deviations: { open, overdue_deferrals }` and `summary.open_deviations` + `summary.overdue_deferrals` counts via new `fetchDeviationAlerts()` helper — gracefully returns empty if `pg.getDeviations` is absent (older gateway)
 - `src/governance/authority.js`: `DEFAULT_ROLE_SCORES` is now `export const` (required for gateway's deviation severity formula to import the same canonical values)
 - `src/graph/queries.js`: fixed `insertDeviationAction` SQL params order bug (was `actor_role` before `actor`; columns are `actor, actor_role`)
+
+**v0.4 Wave E+F (complete):** Conformance Scoring + Portfolio Intelligence
+- `src/tools/conformance.js` (new): thin proxy tool — validates `projectId` in ctx, delegates to `pg.getConformance()` (gateway `GET /api/conformance`). UNCERTIFIED returns contextual message variant (no scan / no catalogs / sparse coverage). `include_details: true` fetches top 10 OPEN deviations via `pg.getDeviations({ status: 'OPEN', limit: 10 })` and sorts by severity desc (capped at 10). Registered as 14th tool in `src/server.js`.
+- `src/gateway/client.js`: added `getConformance()` → `GET /api/conformance`; added `getPortfolio(opts)` → `GET /api/portfolio?node_id=...`
+- `src/graph/queries.js`: added `getPortfolioScores(pg, projectInfos)` — vendored copy of gateway function; `Promise.allSettled` for per-project failure isolation; checks `pg.getPortfolioScores()` override first (test injection)
+- `skill/references/scan.md` (new): full `quorum:scan` skill doc — incremental scan orchestration (check conformance → git diff → code-review → security-review → deviate()/remember() per finding → resolve fixed → updated conformance → return summary); scheduled scanning via `quorum:schedule`; key constraints documented (one call per pattern, never deviate() for non-linked catalogs)
+- Tests: `tests/tools/conformance.test.js` (15 tests — projectId validation, 3 UNCERTIFIED message variants, no-getDeviations call when UNCERTIFIED, CERTIFIED pass-through, include_details sort+cap, empty/undefined deviations graceful, audit pipeline author)
 
 **Agent identity (v0.3):** `set_agent_context({ agent_id })` is Gate 3 — must be called before any write tool (`remember`, `reflect`, `forget`, `review`). `agent_id` is validated as `^[a-z][a-z0-9-]{0,39}$`. `session_id` is derived server-side from `hash(PID + hrtime.bigint())` → `sess_` + 8 hex chars. `author_type` is always `'agent'` (never caller-supplied) — distinguishes agent MCP writes from human dashboard writes (`author_type: 'human'` on all dashboard create/promote/supersede/deprecate actions). All three fields are written to `knowledge_versions.agent_id`, `.session_id`, `.author_type` via `buildVersionRecord()`.
 

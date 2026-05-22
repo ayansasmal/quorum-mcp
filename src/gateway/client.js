@@ -421,6 +421,32 @@ export class GatewayClient {
     return this._get(`/api/deviations?${params}`)
   }
 
+  // ── Conformance + portfolio ────────────────────────────────────────────────
+
+  /**
+   * Project conformance scorecard.
+   * @returns {Promise<{
+   *   score: number|null, status: 'CERTIFIED'|'UNCERTIFIED',
+   *   applicable_entries: number, scan_count: number, last_scan_at: string|null,
+   *   breakdown: object, catalogs: Array<{catalog_id: string, entry_count: number}>
+   * }>}
+   */
+  async getConformance() {
+    return this._get('/api/conformance')
+  }
+
+  /**
+   * Portfolio view — conformance scores for all accessible projects.
+   * @param {{ node_id?: string }} [opts]
+   * @returns {Promise<{ projects: Array<object>, rollup: object|null }>}
+   */
+  async getPortfolio(opts = {}) {
+    const params = new URLSearchParams()
+    if (opts.node_id) params.set('node_id', opts.node_id)
+    const qs = params.toString()
+    return this._get(`/api/portfolio${qs ? `?${qs}` : ''}`)
+  }
+
   // ── Config ─────────────────────────────────────────────────────────────────
 
   async getConfig(projectId) {

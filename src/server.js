@@ -48,6 +48,7 @@ import * as exportTool from './tools/export.js';
 import * as pending from './tools/pending.js';
 import * as configUpload from './tools/config-upload.js';
 import * as deviate from './tools/deviate.js';
+import * as conformance from './tools/conformance.js';
 
 // ── Gateway URL (required) ─────────────────────────────────────────────────────
 // QUORUM_GATEWAY_URL must be set — either via the .quorum project file,
@@ -85,6 +86,7 @@ const tools = [
   { name: 'export', def: exportTool },
   { name: 'pending', def: pending },
   { name: 'deviate', def: deviate },
+  { name: 'conformance', def: conformance },
 ];
 
 /**
