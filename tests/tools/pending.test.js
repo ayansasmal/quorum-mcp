@@ -269,3 +269,81 @@ describe('pending() — deprecation_requests section', () => {
     expect(result.summary.deprecation_requests).toBe(0)
   })
 })
+
+describe('pending() — deviation alerts section', () => {
+  beforeEach(() => {
+    vi.resetAllMocks()
+    getPendingDecisions.mockResolvedValue([])
+    getDraftVersions.mockResolvedValue([])
+    // Re-install getConfig default after resetAllMocks
+    const { getConfig } = require('../../src/config/loader.js')
+    if (getConfig && getConfig.mockReturnValue) getConfig.mockReturnValue({ domains: {} })
+  })
+
+  it('returns empty deviation alerts when pg has no getDeviations method', async () => {
+    // pg without getDeviations (e.g. raw pg.Pool stub or older gateway)
+    const result = await handler({}, {}, identity, testCtx)
+
+    expect(result.deviations).toEqual({ open: [], overdue_deferrals: [] })
+    expect(result.summary.open_deviations).toBe(0)
+    expect(result.summary.overdue_deferrals).toBe(0)
+  })
+
+  it('returns open deviations from gateway', async () => {
+    const openDev = { deviation_id: 'dev-1', topic: 'auth', key: 'tls-required', severity: 0.64 }
+    const pgWithDeviations = {
+      getDeviations: vi.fn().mockImplementation((filters) => {
+        if (filters.status === 'OPEN')    return Promise.resolve({ deviations: [openDev] })
+        if (filters.status === 'OVERDUE') return Promise.resolve({ deviations: [] })
+        return Promise.resolve({ deviations: [] })
+      }),
+    }
+
+    const result = await handler(pgWithDeviations, {}, identity, testCtx)
+
+    expect(result.deviations.open).toHaveLength(1)
+    expect(result.deviations.open[0].deviation_id).toBe('dev-1')
+    expect(result.deviations.overdue_deferrals).toHaveLength(0)
+    expect(result.summary.open_deviations).toBe(1)
+  })
+
+  it('returns overdue deferrals from gateway', async () => {
+    const overdueDev = { deviation_id: 'dev-2', topic: 'db', key: 'no-raw-sql', severity: 0.80 }
+    const pgWithDeviations = {
+      getDeviations: vi.fn().mockImplementation((filters) => {
+        if (filters.status === 'OPEN')    return Promise.resolve({ deviations: [] })
+        if (filters.status === 'OVERDUE') return Promise.resolve({ deviations: [overdueDev] })
+        return Promise.resolve({ deviations: [] })
+      }),
+    }
+
+    const result = await handler(pgWithDeviations, {}, identity, testCtx)
+
+    expect(result.deviations.overdue_deferrals).toHaveLength(1)
+    expect(result.deviations.overdue_deferrals[0].deviation_id).toBe('dev-2')
+    expect(result.summary.overdue_deferrals).toBe(1)
+  })
+
+  it('gracefully returns empty when getDeviations throws', async () => {
+    const pgWithError = { getDeviations: vi.fn().mockRejectedValue(new Error('network error')) }
+    const result = await handler(pgWithError, {}, identity, testCtx)
+
+    expect(result.deviations).toEqual({ open: [], overdue_deferrals: [] })
+  })
+
+  it('includes deviation counts in summary total_pending', async () => {
+    const pgWithDeviations = {
+      getDeviations: vi.fn().mockImplementation((filters) => {
+        if (filters.status === 'OPEN')    return Promise.resolve({ deviations: [{ id: 'a' }, { id: 'b' }] })
+        if (filters.status === 'OVERDUE') return Promise.resolve({ deviations: [{ id: 'c' }] })
+        return Promise.resolve({ deviations: [] })
+      }),
+    }
+
+    const result = await handler(pgWithDeviations, {}, identity, testCtx)
+
+    expect(result.summary.total_pending).toBe(3)  // 2 open + 1 overdue
+    expect(result.summary.open_deviations).toBe(2)
+    expect(result.summary.overdue_deferrals).toBe(1)
+  })
+})

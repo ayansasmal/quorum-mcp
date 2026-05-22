@@ -13,9 +13,14 @@
  *
  * Output shape:
  *   {
- *     conflict_briefs: [...],   // pending conflict decisions, enriched + stale-aware
- *     draft_reviews:  [...],    // DRAFT knowledge entries awaiting approve/reject
- *     summary: { total_pending, conflicts, drafts }
+ *     conflict_briefs:      [...],  // pending conflict decisions, enriched + stale-aware
+ *     draft_reviews:        [...],  // DRAFT knowledge entries awaiting approve/reject
+ *     deprecation_requests: [...],  // pending deprecation requests from non-PE engineers
+ *     deviations: {
+ *       open:             [...],    // OPEN deviations from linked global catalogs
+ *       overdue_deferrals:[...],    // DEFERRED deviations whose defer_until has passed
+ *     },
+ *     summary: { total_pending, conflicts, drafts, deprecation_requests, open_deviations, overdue_deferrals }
  *   }
  */
 
@@ -51,10 +56,11 @@ export async function handler(pg, input, identity, ctx) {
       governanceData: { topic: input.topic, include_stale: input.include_stale },
     },
     async () => {
-      const [conflictBriefs, draftReviews, deprecationRequests] = await Promise.all([
+      const [conflictBriefs, draftReviews, deprecationRequests, deviationAlerts] = await Promise.all([
         fetchConflictBriefs(pg, input, projectId),
         fetchDraftReviews(pg, input, projectId),
         fetchDeprecationRequests(pg, input, projectId),
+        fetchDeviationAlerts(pg, input),
       ])
 
       return {
@@ -62,11 +68,15 @@ export async function handler(pg, input, identity, ctx) {
           conflict_briefs:      conflictBriefs,
           draft_reviews:        draftReviews,
           deprecation_requests: deprecationRequests,
+          deviations:           deviationAlerts,
           summary: {
-            total_pending:        conflictBriefs.length + draftReviews.length + deprecationRequests.length,
+            total_pending:        conflictBriefs.length + draftReviews.length + deprecationRequests.length +
+                                  deviationAlerts.open.length + deviationAlerts.overdue_deferrals.length,
             conflicts:            conflictBriefs.length,
             drafts:               draftReviews.length,
             deprecation_requests: deprecationRequests.length,
+            open_deviations:      deviationAlerts.open.length,
+            overdue_deferrals:    deviationAlerts.overdue_deferrals.length,
           },
         },
         versionImpact: buildAuditVersionImpact([], []),
@@ -223,4 +233,41 @@ async function fetchDraftReviews(pg, input, projectId) {
     created_at: row.created_at,
     required_reviewer_teams: domainConfigs[row.topic]?.required_reviewer_teams ?? [],
   }))
+}
+
+// ── Deviation alerts ──────────────────────────────────────────────────────────
+
+/**
+ * Fetch OPEN deviations and OVERDUE deferrals via the gateway.
+ * Gracefully returns empty arrays if the gateway does not yet support the route
+ * (e.g. older instance without Wave C+D) or if the project has no linked catalogs.
+ *
+ * @param {import('../gateway/client.js').GatewayClient} pg
+ * @param {z.infer<typeof schema>} input
+ * @returns {Promise<{ open: Array<Record<string, unknown>>, overdue_deferrals: Array<Record<string, unknown>> }>}
+ */
+async function fetchDeviationAlerts(pg, input) {
+  const empty = { open: [], overdue_deferrals: [] }
+
+  // Only call the gateway if it exposes the getDeviations method (typed gateway client).
+  // Falls back to empty if the method is absent (test stub, older gateway).
+  if (typeof pg.getDeviations !== 'function') return empty
+
+  try {
+    const filters = {}
+    if (input.topic) filters.topic = input.topic
+
+    const [openResult, overdueResult] = await Promise.all([
+      pg.getDeviations({ ...filters, status: 'OPEN',    limit: 50 }),
+      pg.getDeviations({ ...filters, status: 'OVERDUE', limit: 50 }),
+    ])
+
+    return {
+      open:             openResult?.deviations    ?? [],
+      overdue_deferrals: overdueResult?.deviations ?? [],
+    }
+  } catch {
+    // Non-fatal — older gateway or network error; pending still shows knowledge decisions
+    return empty
+  }
 }

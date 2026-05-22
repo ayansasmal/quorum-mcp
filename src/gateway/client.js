@@ -381,6 +381,46 @@ export class GatewayClient {
     return this._get(`/pg/search?${params}`)
   }
 
+  // ── Deviations ─────────────────────────────────────────────────────────────
+
+  /**
+   * Record a deviation from a linked global catalog entry.
+   * Delegates all business logic (catalog validation, severity computation,
+   * idempotent upsert) to the gateway.
+   *
+   * @param {{
+   *   catalog_id:  string,
+   *   topic:       string,
+   *   key:         string,
+   *   description: string,
+   *   evidence:    object | null,
+   *   source:      string,
+   *   author:      string,
+   * }} record
+   * @returns {Promise<{ status: string, deviation_id?: string, severity?: number, is_new?: boolean, message: string }>}
+   */
+  async recordDeviation(record) {
+    return this._post('/api/deviations', record)
+  }
+
+  /**
+   * List deviations for the current project with optional filters.
+   * @param {{ status?: string, catalog_id?: string, topic?: string, severity_min?: number,
+   *            source?: string, limit?: number, offset?: number }} [filters]
+   * @returns {Promise<{ deviations: Array<object>, total: number }>}
+   */
+  async getDeviations(filters = {}) {
+    const params = new URLSearchParams()
+    if (filters.status)       params.set('status',       filters.status)
+    if (filters.catalog_id)   params.set('catalog_id',   filters.catalog_id)
+    if (filters.topic)        params.set('topic',         filters.topic)
+    if (filters.severity_min !== undefined) params.set('severity_min', String(filters.severity_min))
+    if (filters.source)       params.set('source',        filters.source)
+    if (filters.limit)        params.set('limit',          String(filters.limit))
+    if (filters.offset)       params.set('offset',         String(filters.offset))
+    return this._get(`/api/deviations?${params}`)
+  }
+
   // ── Config ─────────────────────────────────────────────────────────────────
 
   async getConfig(projectId) {
