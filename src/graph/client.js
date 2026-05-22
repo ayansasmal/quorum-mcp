@@ -44,7 +44,7 @@ const GRAPHITI_URL = process.env.GRAPHITI_URL || 'http://graphiti:8000'
  * @param {string} id
  * @returns {string}
  */
-function normalizeGroupId(id) {
+export function normalizeGroupId(id) {
   return typeof id === 'string' ? id.replace(/-/g, '_') : id
 }
 
@@ -364,40 +364,43 @@ export async function getEvolutionChain(episodeId, groupId) {
 /**
  * Search for knowledge nodes semantically.
  *
- * group_ids is normalized (hyphen → underscore) via normalizeGroupId before
- * being sent to Graphiti. RediSearch — used internally by FalkorDB — treats
- * `-` as a NOT operator, so un-normalized hyphenated group_ids silently
- * return zero results. In gateway mode the proxy also normalizes; this is
- * the direct-mode safeguard.
+ * Accepts a single groupId or an array of groupIds (e.g. [projectId, ...globals]).
+ * All IDs are normalized (hyphen → underscore) via normalizeGroupId before being
+ * sent to Graphiti. RediSearch — used internally by FalkorDB — treats `-` as a
+ * NOT operator, so un-normalized hyphenated group_ids silently return zero results.
+ * In gateway mode the proxy also normalizes; this is the direct-mode safeguard.
  *
  * @param {string} query
  * @param {{ limit?: number, groupIds?: string[], groupId?: string }} [options]
  * @returns {Promise<{ nodes: Array<unknown> }>}
  */
 export async function searchNodes(query, options = {}) {
-  const groupId = options.groupId ?? options.groupIds?.[0]
+  // Resolve to an array: options.groupIds takes precedence over single options.groupId
+  const ids = options.groupIds ?? (options.groupId ? [options.groupId] : null)
+  const normalizedIds = ids?.map(normalizeGroupId).filter(Boolean)
   return callGraphiti('search_nodes', {
     query,
     max_nodes: options.limit ?? 10,
-    ...(groupId ? { group_ids: [normalizeGroupId(groupId)] } : {}),
+    ...(normalizedIds?.length ? { group_ids: normalizedIds } : {}),
   })
 }
 
 /**
  * Search for relationships/edges across the knowledge graph.
  *
- * group_ids is normalized (hyphen → underscore) via normalizeGroupId — see
- * searchNodes for the rationale (RediSearch NOT-operator collision).
+ * Accepts a single groupId or an array of groupIds — see searchNodes for the
+ * rationale (RediSearch NOT-operator collision on hyphenated IDs).
  *
  * @param {string} query
  * @param {{ groupIds?: string[], groupId?: string }} [options]
  * @returns {Promise<{ facts: Array<unknown> }>}
  */
 export async function searchFacts(query, options = {}) {
-  const groupId = options.groupId ?? options.groupIds?.[0]
+  const ids = options.groupIds ?? (options.groupId ? [options.groupId] : null)
+  const normalizedIds = ids?.map(normalizeGroupId).filter(Boolean)
   return callGraphiti('search_memory_facts', {
     query,
-    ...(groupId ? { group_ids: [normalizeGroupId(groupId)] } : {}),
+    ...(normalizedIds?.length ? { group_ids: normalizedIds } : {}),
   })
 }
 

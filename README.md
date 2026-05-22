@@ -3,7 +3,7 @@
 **Governed engineering and business memory for Claude Code and AI agents.**
 
 [![npm](https://img.shields.io/npm/v/@as-quorum/mcp?label=%40as-quorum%2Fmcp&color=cb0000&logo=npm)](https://www.npmjs.com/package/@as-quorum/mcp)
-[![Tests](https://img.shields.io/badge/tests-559%20passing-brightgreen?logo=vitest&logoColor=white)](https://github.com/ayansasmal/quorum-mcp)
+[![Tests](https://img.shields.io/badge/tests-620%20passing-brightgreen?logo=vitest&logoColor=white)](https://github.com/ayansasmal/quorum-mcp)
 [![Coverage — Lines](https://img.shields.io/badge/lines-86%25-brightgreen)](https://github.com/ayansasmal/quorum-mcp)
 [![Coverage — Branches](https://img.shields.io/badge/branches-79%25-brightgreen)](https://github.com/ayansasmal/quorum-mcp)
 [![Node](https://img.shields.io/badge/node-%3E%3D22-brightgreen?logo=nodedotjs&logoColor=white)](https://nodejs.org)
@@ -37,7 +37,7 @@ Claude Code / AI Agents / PMs / BAs
                                 FalkorDB
 ```
 
-The MCP server exposes 12 tools to Claude. All persistence goes through the Quorum gateway over HTTP — this package never touches a database directly.
+The MCP server exposes 14 tools to Claude. All persistence goes through the Quorum gateway over HTTP — this package never touches a database directly.
 
 **Identity model (v0.3):** the JWT carries only `{ sub, is_admin }`. The active project is sent as the `X-Quorum-Project` header on every request. `resolveCtx()` resolves this from the `.quorum` file in the project root and threads it through all tool calls.
 
@@ -85,17 +85,20 @@ quorum init        # creates .quorum file with project group_id
 
 | Tool | What it does |
 |------|-------------|
+| `set_agent_context` | Register agent identity before any write — required gate before `remember`/`reflect`/`forget`/`review` |
 | `remember` | Store a decision, pattern, constraint, or requirement — versioned, with provenance |
-| `recall` | Fetch current version of a specific knowledge entry; XML output for Claude context |
-| `search` | Semantic search across the knowledge graph; PG ILIKE fallback if Graphiti empty |
+| `recall` | Fetch current version of a specific knowledge entry; XML output for Claude context; annotated `source: 'global'` for catalog entries |
+| `search` | Semantic search across the knowledge graph and linked global catalogs; results annotated `source`/`catalog_id` |
 | `reflect` | Extract and store learnable knowledge from a completed task (stored as DRAFT) |
 | `history` | Full version history of an entry (who changed what, when, and why) |
 | `export` | Export knowledge as Markdown or Confluence-ready format |
 | `forget` | Soft-delete an entry (requires reason ≥ 10 chars, creates DEPRECATED version) |
 | `review` | Approve or reject a DRAFT entry (no self-approval enforced constitutionally) |
-| `pending` | Surface unresolved conflicts and DRAFTs awaiting human review |
+| `pending` | Surface unresolved conflicts, DRAFTs, open deviations, and overdue deferrals awaiting human review |
 | `authenticate` | PKCE OAuth 2.1 flow — opens browser to GitHub login, stores slim JWT in-memory |
 | `config_upload` | Upload a `<group_id>.quorum.json` config to S3 and sync membership index |
+| `deviate` | Record a deviation from a global catalog entry — idempotent upsert, severity derived server-side |
+| `conformance` | Return project conformance score (0–100%) or UNCERTIFIED status with linked catalog breakdown |
 
 ---
 
@@ -159,9 +162,9 @@ echo "my-project-group-id" > .quorum
 src/
   server.js           — MCP entry point, tool registration, resolveCtx()
   quorum-file.js      — .quorum project file auto-discovery
-  tools/              — One file per MCP tool (remember · recall · search · reflect
-                        history · export · forget · review · pending · authenticate
-                        config_upload)
+  tools/              — One file per MCP tool (set_agent_context · remember · recall · search
+                        reflect · history · export · forget · review · pending
+                        authenticate · config_upload · deviate · conformance)
   governance/         — conflict.js · authority.js · confidence.js · constitutional.js
                         provenance.js (buildVersionRecord — writes to PG summary column)
   audit/              — pipeline.js · chain.js · primary.js · secondary.js
@@ -197,7 +200,7 @@ npm install
 npm run build:all    # compile server + CLI → dist/
 npm run setup        # install skill, hooks, MCP (alias for: quorum install)
 npm run dev          # node --watch src/server.js (no build step needed for MCP server)
-npm test             # run all tests (36 files, 559 tests)
+npm test             # run all tests (37 files, 620 tests)
 npm test -- --coverage  # coverage report (lines 86%, branches 79%, functions 84%)
 ```
 
@@ -213,7 +216,7 @@ npm test -- --coverage  # coverage report (lines 86%, branches 79%, functions 84
 | Branches | **79%** | 75% |
 | Functions | **84%** | 75% |
 
-Test files: **36** · Tests: **559 passing**
+Test files: **37** · Tests: **620 passing**
 
 Coverage provider: v8 · Excluded from coverage pool: `server.js`, `quorum-file.js`, `prompts/loader.js`, `install/postinstall.js`, `config/loader.js` (S3/file I/O), `config/migrations.js` (DB schema migrations).
 
@@ -232,6 +235,9 @@ Coverage provider: v8 · Excluded from coverage pool: `server.js`, `quorum-file.
 | Content in PostgreSQL | `src/governance/provenance.js` — `buildVersionRecord()` writes `summary: params.content` |
 | Agent identity before writes | `src/server.js` Gate 3 — `set_agent_context()` required before `remember`/`reflect`/`forget`/`review` |
 | `author_type` always `'agent'` | `src/tools/set-agent-context.js` — never accepted from caller input |
+| Global write authority (v0.4) | `src/governance/constitutional.js` `enforceGlobalWriteAuthority()` — architect+ only; config-driven via `getConfig()?.is_global === true` |
+| Deviation action authority (v0.4) | `src/governance/constitutional.js` `enforceDeviationActionAuthority()` — architect+ only; blocks executive roles |
+| Defer deadline (v0.4) | `src/governance/constitutional.js` `enforceValidDeferDeadline()` — must be 30/45/60/90 days |
 
 ---
 

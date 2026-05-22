@@ -274,6 +274,7 @@ async function handleDeprecationRequest(pg, input, identity, ctx) {
           supersedesReason: row.conflict_reason,
           status:           KnowledgeStatus.DEPRECATED,
           projectId,
+          entityType:       existing.entity_type ?? null,
           agentId:          ctx?.agentId    ?? null,
           sessionId:        ctx?.sessionId  ?? null,
           authorType:       ctx?.authorType ?? 'agent',

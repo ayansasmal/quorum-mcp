@@ -264,6 +264,120 @@ signal quality. See [`references/knowledge-guidelines.md`](references/knowledge-
 
 ---
 
+## Conformance Scanning — v0.4
+
+### When to call `deviate()`
+
+Call `deviate()` when a code review or security review finding matches an entry in one of the
+project's linked global catalogs. Do NOT call `deviate()` for unmatched findings — use
+`remember()` for those (they become project-level DRAFTs for PE/PA review).
+
+```javascript
+// A finding matched a global catalog entry via search() — source: 'global'
+deviate({
+  catalog_id: "security-standards",   // group_id of the matched global catalog
+  topic:       "security",            // must match the catalog entry's topic (kebab-case)
+  key:         "sql-injection-prevention",  // must match the catalog entry's key (kebab-case)
+  description: "parameterized queries not used in UserRepository.findByEmail()",
+  evidence: {
+    files:   ["src/repositories/user.js"],
+    lines:   ["line 47"],
+    excerpt: "db.query(`SELECT * FROM users WHERE email = '${email}'`)"
+  },
+  source: "code-review"  // 'agent' | 'code-review' | 'security-review'
+})
+```
+
+**Important rules:**
+- `catalog_id` must be in the project's `globals` list — `deviate()` returns `not_linked` otherwise
+- `topic:key` must exist in that catalog — returns `not_found` if the entry doesn't exist
+- One call per **pattern**, not per file instance. Group all instances of the same pattern into the `evidence.files` array
+- Severity is derived server-side from the catalog entry's confidence × author role weight — never accept from client
+
+**Return values:**
+
+| Return | Meaning | Action |
+|--------|---------|--------|
+| `{ status: 'recorded', is_new: true }` | New deviation recorded | Continue scan |
+| `{ status: 'recorded', is_new: false }` | Existing deviation — `last_seen_at` updated | Continue scan |
+| `{ status: 'not_linked' }` | `catalog_id` not in project's `globals` list | Use `remember()` instead |
+| `{ status: 'not_found' }` | `topic:key` not in catalog | Use `remember()` instead |
+
+---
+
+### When to call `conformance()`
+
+Call `conformance()` to see the current project conformance state before and after a scan:
+
+```javascript
+// Basic state check (no deviation details)
+conformance()
+
+// Full state with top 10 open deviations sorted by severity
+conformance({ include_details: true })
+```
+
+**Return value interpretation:**
+
+| `status` field | Meaning | What to tell the human |
+|---------------|---------|------------------------|
+| `UNCERTIFIED` | Catalog coverage < 10 entries, no scan run, or no globals linked | Show the `message` field — it explains the specific reason |
+| `CERTIFIED` | Scored | Report `score`, `breakdown`, `last_scan_at` |
+
+---
+
+### `quorum:scan` — Orchestration Pattern
+
+> Load [`references/scan.md`](references/scan.md) for the full scan protocol.
+
+**Quick reference — scan workflow:**
+
+```
+1. conformance()                             ← baseline before scan
+2. git diff HEAD~1 --name-only               ← identify changed files (incremental)
+3. For each changed file: run code-review + security-review skills
+4. For each finding:
+     a. search("finding keywords") — look for a matching global catalog entry
+     b. If match found (source: 'global'):
+        deviate({ catalog_id, topic, key, description, evidence, source: 'code-review' })
+     c. If no match found:
+        remember(topic, key, description, { entity_type, reason })  ← project-level DRAFT
+5. conformance({ include_details: true })    ← updated state after scan
+6. Return summary: { deviations_new, deviations_confirmed, deviations_resolved }
+```
+
+**Critical constraints (enforce strictly):**
+- One `deviate()` per distinct **pattern** — never one per file instance
+- Never call `deviate()` for a `catalog_id` not in the project's `globals` list
+- Never call `deviate()` if `topic:key` does not exist in the specified catalog
+- Group file locations into `evidence.files`, not into separate `deviate()` calls
+
+---
+
+### Responding to `pending()` deviation data (v0.4)
+
+`pending()` returns a `deviations` section alongside the existing `decisions` and `deprecation_requests`:
+
+```javascript
+{
+  deviations: {
+    open:              [...],   // OPEN deviations — brief the human
+    overdue_deferrals: [...]    // DEFERRED with defer_until passed — treat with urgency
+  }
+}
+```
+
+**How to handle:**
+
+| Section | Action |
+|---------|--------|
+| `open` count > 0 | Note: *"N deviations are open. Dashboard → http://localhost:3002/deviations"* — do not block the session |
+| `overdue_deferrals` > 0 | Surface with urgency: *"N overdue deferrals need re-actioning — they are scoring at full weight until resolved"* |
+
+Deviations are informational at session start — they do not block the way unresolved conflicts do.
+
+---
+
 ## Conflict Resolution — Guide, Don't Just Report
 
 When a conflict is detected (`conflict_detected` in response or in `pending()`):
@@ -575,7 +689,7 @@ Violations are **rejected**, not warned:
 # Session start (always)
 ls .quorum                                       ← verify project is connected
 set_agent_context({ agent_id: "claude-code" })   ← required before any writes (Gate 3)
-pending()                                        ← conflicts block; drafts note-only
+pending()                                        ← conflicts block; drafts note-only; open deviations = informational
 search("task domain")                            ← load context before touching code
 
 # Retrieve — always search first, then recall
@@ -626,7 +740,26 @@ export("topic", "markdown")
 forget("topic", "key", "reason — min 10 chars")
 ```
 
+# Conformance (v0.4)
+conformance()                                    ← current score/status for this project
+conformance({ include_details: true })           ← + top 10 open deviations by severity
+
+# Deviation recording (v0.4) — only after search() confirms global catalog match
+deviate({
+  catalog_id: "security-standards",             ← group_id of the global catalog
+  topic:      "security",                        ← must match catalog entry's topic
+  key:        "sql-injection-prevention",        ← must match catalog entry's key
+  description: "finding description",
+  evidence:   { files: [...], lines: [...], excerpt: "..." },
+  source:     "code-review"                      ← 'agent'|'code-review'|'security-review'
+})
+# → not_linked: catalog_id not in project globals → use remember() instead
+# → not_found:  topic:key not in catalog           → use remember() instead
+# → recorded:   deviation created or last_seen_at updated
+```
+
 **Review queue:** Dashboard → http://localhost:3002/pending (preferred for humans)
+**Deviations:** Dashboard → http://localhost:3002/deviations (PE action panel)
 
 ---
 
@@ -688,3 +821,4 @@ Load when you need full detail:
 | [`references/knowledge-guidelines.md`](references/knowledge-guidelines.md) | What to store, quality bar, over-extraction guard, discovery vs. reflect() |
 | [`references/onboarding.md`](references/onboarding.md) | Full 10-phase project onboarding protocol |
 | [`references/login.md`](references/login.md) | Auth flow, token contents, project mismatch, error reference |
+| [`references/scan.md`](references/scan.md) | Full `quorum:scan` orchestration protocol — incremental scan, evidence grouping, resolve-fixed flow |
