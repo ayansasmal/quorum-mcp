@@ -12,7 +12,7 @@ npx @as-quorum/mcp install
 
 ## Purpose
 
-MCP server that exposes 12 tools to Claude Code: `set_agent_context`, `remember`, `recall`, `search`, `reflect`, `history`, `export`, `forget`, `review`, `pending`, `authenticate`, `config_upload`.
+MCP server that exposes 13 tools to Claude Code: `set_agent_context`, `remember`, `recall`, `search`, `reflect`, `history`, `export`, `forget`, `review`, `pending`, `authenticate`, `config_upload`, `deviate`.
 
 Always communicates with a Quorum gateway over HTTP. **Never connects to PostgreSQL directly.** Default gateway URL: `http://localhost:3001` (local dev Docker stack).
 
@@ -79,6 +79,13 @@ npm run test:constitutional  # Layer 1 only (blocking CI gate)
 - `remember.js`: passes `getConfig()?.globals ?? []` to `detectConflict`
 - `search.js`: config-driven globals via `getConfig()`; per-catalog `searchNodes` calls preserve `catalog_id` attribution; results annotated `source: 'project'|'global'`, `catalog_id: string|null`
 - `recall.js`: config-driven globals fallback loop after project miss; XML result annotated `source` + `catalog_id` attributes; sourced-from-global comment injected when applicable
+
+**v0.4 Wave C+D (complete):** Deviation Write Path + PE Governance
+- `src/tools/deviate.js` (new): thin proxy tool — validates `projectId` in ctx, delegates ALL business logic to `pg.recordDeviation()` (gateway handles catalog link validation, severity derivation, idempotent upsert). Returns `{ deviation_id, catalog_id, severity, status, message, is_new }` from gateway.
+- `src/gateway/client.js`: added `recordDeviation(record)` → `POST /api/deviations`; added `getDeviations(filters)` → `GET /api/deviations?...` with full filter support (`status`, `catalog_id`, `topic`, `severity_min`, `source`, `limit`, `offset`)
+- `src/tools/pending.js`: extended response shape with `deviations: { open, overdue_deferrals }` and `summary.open_deviations` + `summary.overdue_deferrals` counts via new `fetchDeviationAlerts()` helper — gracefully returns empty if `pg.getDeviations` is absent (older gateway)
+- `src/governance/authority.js`: `DEFAULT_ROLE_SCORES` is now `export const` (required for gateway's deviation severity formula to import the same canonical values)
+- `src/graph/queries.js`: fixed `insertDeviationAction` SQL params order bug (was `actor_role` before `actor`; columns are `actor, actor_role`)
 
 **Agent identity (v0.3):** `set_agent_context({ agent_id })` is Gate 3 — must be called before any write tool (`remember`, `reflect`, `forget`, `review`). `agent_id` is validated as `^[a-z][a-z0-9-]{0,39}$`. `session_id` is derived server-side from `hash(PID + hrtime.bigint())` → `sess_` + 8 hex chars. `author_type` is always `'agent'` (never caller-supplied) — distinguishes agent MCP writes from human dashboard writes (`author_type: 'human'` on all dashboard create/promote/supersede/deprecate actions). All three fields are written to `knowledge_versions.agent_id`, `.session_id`, `.author_type` via `buildVersionRecord()`.
 
