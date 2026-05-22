@@ -868,8 +868,8 @@ export async function insertDeviationAction(pg, record) {
     [
       record.deviationId,
       record.actionType,
-      record.actorRole,
       record.actor,
+      record.actorRole,
       record.reason,
       record.deferUntil ?? null,
     ],

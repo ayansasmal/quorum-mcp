@@ -47,6 +47,7 @@ import * as reflect from './tools/reflect.js';
 import * as exportTool from './tools/export.js';
 import * as pending from './tools/pending.js';
 import * as configUpload from './tools/config-upload.js';
+import * as deviate from './tools/deviate.js';
 
 // ── Gateway URL (required) ─────────────────────────────────────────────────────
 // QUORUM_GATEWAY_URL must be set — either via the .quorum project file,
@@ -83,6 +84,7 @@ const tools = [
   { name: 'reflect', def: reflect },
   { name: 'export', def: exportTool },
   { name: 'pending', def: pending },
+  { name: 'deviate', def: deviate },
 ];
 
 /**
@@ -178,7 +180,7 @@ function sanitizeErrorForClaude(err) {
  */
 export function registerTools() {
   for (const { name, def } of tools) {
-    server.tool(name, def.schema, async input => {
+    server.registerTool(name, { inputSchema: def.schema }, async input => {
       log.startCall(name)
       try {
         // Resolve fresh ctx on every call — stateless, no env mutation.
