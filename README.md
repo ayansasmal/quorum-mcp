@@ -39,7 +39,7 @@ Claude Code / AI Agents / PMs / BAs
 
 The MCP server exposes 14 tools to Claude. All persistence goes through the Quorum gateway over HTTP — this package never touches a database directly.
 
-**Identity model (v0.3):** the JWT carries only `{ sub, is_admin }`. The active project is sent as the `X-Quorum-Project` header on every request. `resolveCtx()` resolves this from the `.quorum` file in the project root and threads it through all tool calls.
+**Identity model:** the JWT carries only `{ sub, is_admin }`. The active project is sent as the `X-Quorum-Project` header on every request. `resolveCtx()` resolves this from the `.quorum` file in the project root and threads it through all tool calls. Executive roles (`director`, `vp_engineering`, `group_executive`) are blocked from deviation governance actions by `enforceDeviationActionAuthority()`.
 
 **Dual-store audit pipeline:** every tool call writes INTENT + OUTCOME entries to PostgreSQL (durable, SHA256 tamper-evident chain) and Graphiti (semantic traversal). If Graphiti is unavailable, writes are stored as `PENDING_CONFLICT_CHECK` in PostgreSQL for later reprocessing.
 
@@ -241,7 +241,7 @@ Coverage provider: v8 · Excluded from coverage pool: `server.js`, `quorum-file.
 
 ---
 
-## v0.3 bug fixes
+## Shipped bug fixes
 
 | Bug | Description | Fix |
 |-----|-------------|-----|
