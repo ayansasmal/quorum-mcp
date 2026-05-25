@@ -396,17 +396,22 @@ async function storeFirst(pg, input, author, confidence, tags, triggeredBy, auth
 
   const inserted = await insertVersion(pg, { ...versionRecord, tags })
 
+  // Use gateway-determined status from the inserted row — the gateway is the
+  // authority on status (role + is_global → DRAFT/ACTIVE). Fall back to
+  // locally computed status only if the gateway did not return a row.
+  const actualStatus = inserted?.status ?? status
+
   return {
     result: {
       status: 'stored',
       topic: input.topic,
       key: input.key,
       version: 1,
-      knowledge_status: status,
+      knowledge_status: actualStatus,
       episode_id: graphitiResult.episode_id,
     },
     versionImpact: buildAuditVersionImpact(
-      [{ version: 1, status, triggered_by: triggeredBy, versionId: inserted?.version_id, qKeyId: inserted?.q_key_id }],
+      [{ version: 1, status: actualStatus, triggered_by: triggeredBy, versionId: inserted?.version_id, qKeyId: inserted?.q_key_id }],
       [],
     ),
   }
@@ -456,7 +461,10 @@ async function storePendingConflictCheck(pg, input, author, confidence, tags, tr
     authorType: ctx?.authorType ?? 'agent',
   })
 
-  const inserted = await insertVersion(pg, { ...versionRecord, tags, project_id: projectId })
+  // pending_conflict_check: true is a flag for the gateway — it tells the gateway
+  // to set status = 'PENDING_CONFLICT_CHECK' server-side instead of DRAFT/ACTIVE.
+  // The gateway is the authority on status; sending a raw status value is not accepted.
+  const inserted = await insertVersion(pg, { ...versionRecord, tags, project_id: projectId, pending_conflict_check: true })
 
   console.error(`[Quorum:remember] Graphiti unavailable — stored ${input.topic}:${input.key} v${version} as PENDING_CONFLICT_CHECK for deferred re-check`)
 
