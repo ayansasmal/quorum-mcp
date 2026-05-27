@@ -76,7 +76,9 @@ export async function handler(gw, input) {
   // ── Upload via gateway ───────────────────────────────────────────────────────
 
   try {
-    const result = await gw._post('/config/upload', configData)
+    const result = typeof gw.uploadConfig === 'function'
+      ? await gw.uploadConfig(configData)
+      : await gw._post('/config/upload', configData)
     return {
       status:       'onboarded',
       project_id:   result.project_id ?? configData.group_id,

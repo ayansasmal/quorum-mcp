@@ -447,6 +447,66 @@ export class GatewayClient {
     return this._get(`/api/portfolio${qs ? `?${qs}` : ''}`)
   }
 
+  // ── Governance LLM calls ──────────────────────────────────────────────────
+
+  /**
+   * Ask the gateway LLM whether two knowledge entries contradict each other.
+   * @param {{ content: string, author: string, confidence: number }} existing
+   * @param {{ content: string, author: string, confidence: number }} incoming
+   * @returns {Promise<{ contradicts: boolean, reason: string, possible_split: boolean, split_suggestion?: string }>}
+   */
+  async detectConflict(existing, incoming) {
+    return this._post('/governance/detect-conflict', { existing, incoming })
+  }
+
+  /**
+   * Generate reviewer enrichment (analysis, risks, questions) for a pending conflict.
+   * @param {string} existing
+   * @param {string} incoming
+   * @param {string} conflictReason
+   * @param {boolean} possibleSplit
+   * @param {string | null} splitSuggestion
+   * @returns {Promise<Record<string, unknown>>}
+   */
+  async enrichConflict(existing, incoming, conflictReason, possibleSplit, splitSuggestion) {
+    return this._post('/governance/enrich', {
+      existing,
+      incoming,
+      conflict_reason: conflictReason,
+      possible_split: possibleSplit,
+      split_suggestion: splitSuggestion ?? null,
+    })
+  }
+
+  /**
+   * Extract learnable knowledge from a task summary via the gateway LLM.
+   * @param {string} taskSummary
+   * @param {string[]} decisionsMade
+   * @param {string[]} patternsUsed
+   * @param {string[]} [constraints]
+   * @returns {Promise<{ items: Array<object> }>}
+   */
+  async extractKnowledge(taskSummary, decisionsMade, patternsUsed, constraints) {
+    const body = {
+      task_summary:   taskSummary,
+      decisions_made: decisionsMade,
+      patterns_used:  patternsUsed,
+    }
+    if (constraints && constraints.length > 0) {
+      body.constraints = constraints
+    }
+    return this._post('/governance/extract', body)
+  }
+
+  /**
+   * Upload a project config to the gateway for onboarding.
+   * @param {Record<string, unknown>} configData - Parsed quorum.config.json content
+   * @returns {Promise<{ project_id: string, q_project_id?: string, message: string }>}
+   */
+  async uploadConfig(configData) {
+    return this._post('/config/upload', configData)
+  }
+
   // ── Config ─────────────────────────────────────────────────────────────────
 
   async getConfig(projectId) {

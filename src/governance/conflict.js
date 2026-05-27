@@ -74,7 +74,9 @@ function getConflictThreshold(domain) {
  */
 async function checkContradiction(existing, incoming, gw) {
   try {
-    const result = await gw._post('/governance/detect-conflict', { existing, incoming })
+    const result = typeof gw.detectConflict === 'function'
+      ? await gw.detectConflict(existing, incoming)
+      : await gw._post('/governance/detect-conflict', { existing, incoming })
     const possibleSplit = Boolean(result.possible_split)
     return {
       contradicts: Boolean(result.contradicts),
@@ -115,13 +117,15 @@ export async function generateEnrichment(existing, incoming, conflictReason, pos
   }
 
   try {
-    const result = await gw._post('/governance/enrich', {
-      existing,
-      incoming,
-      conflict_reason: conflictReason,
-      possible_split: possibleSplit,
-      split_suggestion: splitSuggestion ?? null,
-    })
+    const result = typeof gw.enrichConflict === 'function'
+      ? await gw.enrichConflict(existing, incoming, conflictReason, possibleSplit, splitSuggestion)
+      : await gw._post('/governance/enrich', {
+          existing,
+          incoming,
+          conflict_reason: conflictReason,
+          possible_split: possibleSplit,
+          split_suggestion: splitSuggestion ?? null,
+        })
     return { ...fallback, ...result }
   } catch (err) {
     console.error(`[Quorum:conflict] Enrichment unavailable: ${err.message}`)
