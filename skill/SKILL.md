@@ -246,10 +246,9 @@ If the answer is anything → call `reflect()` once:
 
 ```javascript
 reflect("concise task summary — what was built and why", {
-  decisions:    ["decision 1 with rationale", "decision 2 with rationale"],
-  patterns:     ["pattern used and why it fits here"],
-  constraints:  ["constraint discovered or confirmed"],
-  requirements: ["business or product requirement captured"]
+  decisions_made: ["decision 1 with rationale", "decision 2 with rationale"],
+  patterns_used:  ["pattern used and why it fits here"],
+  constraints:    ["constraint discovered or confirmed"]
 })
 ```
 
@@ -375,6 +374,40 @@ conformance({ include_details: true })
 | `overdue_deferrals` > 0 | Surface with urgency: *"N overdue deferrals need re-actioning — they are scoring at full weight until resolved"* |
 
 Deviations are informational at session start — they do not block the way unresolved conflicts do.
+
+---
+
+### Portfolio Intelligence — v0.4
+
+Portfolio scoring aggregates conformance across all projects in your org hierarchy.
+There is **no `portfolio()` MCP tool** — portfolio is dashboard-only.
+
+**Who can access portfolio:**
+
+| Role | Access |
+|------|--------|
+| `principal_architect` | Own team's portfolio view |
+| `director`, `vp_engineering`, `group_executive` | All projects under their `hierarchy.node_id` |
+| `is_admin` | All projects org-wide |
+| All other roles | 403 Forbidden |
+
+**Dashboard:** `http://localhost:3002` → Stats page → ConformanceCard
+
+**What the portfolio rollup shows:**
+- Per-project conformance score, status (CERTIFIED / UNCERTIFIED), and last scan metadata
+- Weighted rollup: `Σ(score × criticality) / Σ(criticality)` across CERTIFIED projects only
+- UNCERTIFIED projects counted separately — they do not affect the rollup score
+- Projects filter by `hierarchy.node_id` so directors see only their subtree
+
+**From the MCP (current project only):**
+
+```javascript
+conformance()                            ← current project score and status
+conformance({ include_details: true })   ← + top 10 open deviations sorted by severity desc
+```
+
+When a portfolio-role user asks "how are all our projects doing?" — direct them to the
+dashboard Stats page. When they ask about the **current** project's conformance — use `conformance()`.
 
 ---
 
@@ -725,10 +758,9 @@ remember("topic", "key", "resolved content", {
 
 # Post-task
 reflect("what was built and why", {
-  decisions:    ["..."],
-  patterns:     ["..."],
-  constraints:  ["..."],
-  requirements: ["business or product requirement captured"]
+  decisions_made: ["..."],
+  patterns_used:  ["..."],
+  constraints:    ["..."]
 })
 # → if conflict_detected in response → resolve before closing session
 # → if stored_pending_conflict_check → warn human, Graphiti unavailable
@@ -740,6 +772,7 @@ export("topic", "markdown")
 forget("topic", "key", "reason — min 10 chars")
 ```
 
+```
 # Conformance (v0.4)
 conformance()                                    ← current score/status for this project
 conformance({ include_details: true })           ← + top 10 open deviations by severity

@@ -97,6 +97,95 @@ If `"valid": false` → fix errors in the response, re-validate. Do not continue
 
 ---
 
+## Phase 3b — Optional: Link to global catalogs (federation)
+
+Skip this phase if your project is a standalone team with no shared engineering or compliance standards.
+Come back to it once your organisation has a global catalog project to link to.
+
+**What is federation?**
+A *global catalog* is a Quorum project with `is_global: true`. It acts as a shared library of
+standards (security baselines, API design rules, compliance requirements). When your project links
+to a global catalog, Claude can:
+- Search global catalog entries alongside your project's knowledge
+- Record deviations when your code violates a catalog standard
+- Report a conformance score that tells you how well you track the org standard
+
+**Step 1 — Add v0.4 fields to your config file**
+
+Extend the `<project_id>.quorum.json` created in Phase 3 with any of these optional fields:
+
+```json
+{
+  "$schema": "http://localhost:3001/schema/config",
+  "group_id": "<project_id>",
+  "owner": "<github_username>",
+
+  // Link to one or more global catalog projects
+  "globals": ["security-standards", "api-design-catalog"],
+
+  // Set to true only if THIS project IS the global catalog
+  // (most projects leave this false)
+  "is_global": false,
+
+  // Organisational hierarchy — used by portfolio rollup to scope what directors/VPs see
+  "hierarchy": {
+    "node_id": "eng/platform",          // dot- or slash-separated path in org tree
+    "parent":  "eng",                   // parent node_id (omit for root)
+    "display_name": "Platform Team"     // human-readable label
+  },
+
+  "members": [...],
+  "roles": {...},
+  "domains": {},
+  "thresholds": {...}
+}
+```
+
+**Step 2 — Discover available global catalogs**
+
+```bash
+GATEWAY_URL="${QUORUM_GATEWAY_URL:-http://localhost:3001}"
+curl -s -H "Authorization: Bearer <your-jwt>" "$GATEWAY_URL/api/globals"
+```
+
+This returns all `is_global: true` projects visible to your role. The `global_scope` field
+tells you the intended audience:
+- `org` — visible to all projects
+- `division` — visible to projects under the same division hierarchy node
+- `department` — visible to projects under the same department hierarchy node
+
+**Step 3 — Validate and check global catalog membership**
+
+Add the relevant `group_id` values to the `globals` array in your config. Constraints:
+- `globals` cannot include your own `group_id` (self-reference is rejected with 400)
+- Each catalog listed must have `is_global: true` — a reference to a non-global project
+  generates a `globals_warnings` entry in the `POST /sync/configs` response
+
+Re-validate after adding `globals`:
+
+```bash
+GATEWAY_URL="${QUORUM_GATEWAY_URL:-http://localhost:3001}"
+curl -s -X POST "$GATEWAY_URL/config/validate" \
+  -H "Content-Type: application/json" \
+  -d @"${PROJECT_ID}.quorum.json"
+```
+
+**Step 4 — Note: catalog membership is controlled by the catalog owner**
+
+Linking a catalog in `globals` enables your project to **read** catalog knowledge and
+record deviations. It does not grant write access to the catalog — only the catalog's
+`principal_architect` can add entries to it.
+
+If you are not yet a catalog member, ask the catalog's `principal_architect` to add
+your GitHub username to the catalog's `members` list. Without membership, writes to
+the catalog return `GLOBAL_WRITE_AUTHORITY`.
+
+**After adding federation config:** proceed to Phase 4 (upload) as normal. The gateway
+validates `globals` references during upload and returns `globals_warnings[]` for any
+non-global catalogs referenced.
+
+---
+
 ## Phase 4 — Upload config to gateway
 
 Call `authenticate()` first if not already done — this stores the JWT in MCP server
@@ -329,7 +418,8 @@ curl http://localhost:3001/health
 flowchart TD
     P1[Phase 1: Check existing setup] --> P2[Phase 2: Gather team info]
     P2 --> P3[Phase 3: Create + validate config]
-    P3 --> P4[Phase 4: Upload config to gateway]
+    P3 --> P3b["Phase 3b: Optional — link to global catalogs (federation)"]
+    P3b --> P4[Phase 4: Upload config to gateway]
     P4 --> P5[Phase 5: Create .quorum file]
     P5 --> P6[Phase 6: Share team instructions]
     P6 --> P7[Phase 7: Verify own connection]

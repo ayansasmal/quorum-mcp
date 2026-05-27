@@ -1,6 +1,6 @@
 # Quorum Tool Reference
 
-Full parameter schemas, return shapes, and edge cases for all 12 MCP tools.
+Full parameter schemas, return shapes, and edge cases for all 14 MCP tools.
 
 ---
 
@@ -190,9 +190,9 @@ abandoned tasks.
 
 **Parameters:**
 - `task_summary` — 1–3 sentences: what was done and why
-- `options.decisions` — array of decision strings with rationale. Each item max 500 chars.
-- `options.patterns` — array of pattern strings. Each item max 500 chars.
-- `options.constraints` — array of constraints discovered during the task. Each item max 500 chars.
+- `decisions_made` — array of decision strings with rationale. Each item max 500 chars.
+- `patterns_used` — array of pattern strings. Each item max 500 chars.
+- `constraints` — array of constraints discovered during the task. Each item max 500 chars. Forwarded to the gateway LLM prompt so extracted items reflect these constraints.
 
 **Behaviour:**
 - LLM extraction runs on the gateway (`POST /governance/extract` → OpenAI) — Claude Code does not make the LLM call directly
@@ -234,6 +234,81 @@ Never deprecate autonomously — deprecation is visible to all engineers and
 irreversible without a superseding entry.
 
 **Dashboard alternative:** `principal_architect` users can also deprecate from the dashboard — per-row Trash2 icon, multi-select bulk action, or "Deprecate this entry instead" inside the Edit modal. Dashboard deprecations carry `author_type: 'human'` and `triggered_by: 'dashboard'`; MCP deprecations carry `author_type: 'agent'`.
+
+---
+
+## `deviate(catalog_id, topic, key, description, evidence?, source?)`
+
+Record a deviation from a global catalog standard. Use during `quorum:scan` when a
+finding matches an entry in a linked global catalog (from `search()` results).
+
+**Parameters:**
+- `catalog_id` — the global catalog's `group_id` (from `search()` result's `catalog_id` field). **Must be in the project's `globals` list** — the gateway rejects deviations against unlinked catalogs.
+- `topic` — topic of the global catalog entry (must match exactly)
+- `key` — key of the global catalog entry (must match exactly)
+- `description` — description of this project's deviation from the standard. Max 500 chars, plain text.
+- `evidence` — optional `{ files: string[], count: number, details?: string }` pointing to evidence in the codebase
+- `source` — `"code-review"` | `"security-review"` | `"agent"` (default: `"agent"`)
+
+**Idempotent:** if a deviation for `(project, catalog, topic, key)` already exists, re-calling `deviate()` updates `last_seen_at` rather than creating a duplicate. Use this property during incremental scans — always call `deviate()` for active findings, not just new ones.
+
+**One call per pattern, not per file.** If the same anti-pattern appears in 12 files, make one `deviate()` call with all 12 files in `evidence.files`. Multiple calls for the same pattern inflate the deviation count and distort the conformance score.
+
+**Severity formula:** `confidence × authority_score(author_role)`. PA-authored catalog entries with `confidence > 0.85` trigger a denial hint if denied, warning reviewers this is a high-authority standard.
+
+**Returns:**
+```json
+{
+  "status": "recorded",
+  "deviation_id": "dev_abc123",
+  "severity": 0.72,
+  "is_new": true,
+  "message": "Deviation recorded."
+}
+```
+
+**`status` values:**
+- `recorded` — stored (new or updated `last_seen_at` on existing)
+- `not_linked` — `catalog_id` is not in the project's `globals` list → add it via config update
+- `not_found` — `topic:key` does not exist in the named catalog
+
+---
+
+## `conformance(include_details?)`
+
+Project conformance scorecard. Use at the start of `quorum:scan` to establish a
+pre-scan baseline, and after to show the delta.
+
+**Parameters:**
+- `include_details` — if `true`, include top 10 OPEN deviations sorted by severity desc
+
+**Score formula:** `(1 − weighted_deviation_ratio) × 100`
+Status weights: `OPEN/OVERDUE/ACCEPTED = 1.0`, `DEFERRED = 0.6`, `DENIED = 0.3`, `RESOLVED = 0.0`
+
+**Returns (CERTIFIED):**
+```json
+{
+  "status": "CERTIFIED",
+  "score": 87.3,
+  "applicable_entries": 14,
+  "scan_count": 6,
+  "last_scan_at": "2025-11-10T09:00:00Z",
+  "catalogs": [{ "catalog_id": "platform-standards", "entry_count": 14 }],
+  "breakdown": { "OPEN": 1, "ACCEPTED": 1, "DENIED": 0, "DEFERRED": 0, "OVERDUE": 0, "RESOLVED": 1 }
+}
+```
+
+**Returns (UNCERTIFIED):**
+```json
+{ "status": "UNCERTIFIED", "score": null, "message": "No scans recorded — run quorum:scan to establish a baseline." }
+```
+
+**UNCERTIFIED reasons:**
+| Reason | Actionable step |
+|--------|----------------|
+| `scan_count = 0` | Run `quorum:scan` |
+| No linked globals | Run `quorum:onboard` to link a global catalog |
+| Catalog < 10 ACTIVE entries | Ask PE/PA to seed the global catalog |
 
 ---
 
@@ -349,5 +424,14 @@ You cannot call them directly — the MCP server proxies through them automatica
 | `POST /config/upload` | JWT/sync token | Upload + validate config; store in S3 + sync to DDB |
 | `POST /sync/configs` | JWT/sync token | S3→DDB full config sync (EventBridge-compatible) |
 | `GET /graphiti/*path` | JWT + `X-Quorum-Project` | Transparent proxy to Graphiti MCP; injects `group_id`, normalises hyphens → underscores for FalkorDB |
+| `GET /api/search` | JWT + `X-Quorum-Project` | Semantic + ILIKE search across project + linked global catalogs; results annotated `source:'project'|'global'` + `catalog_id` |
+| `GET /api/globals` | JWT | Discover `is_global=true` projects; filtered by `global_scope` (org / division / department) |
+| `POST /api/deviations` | JWT + `X-Quorum-Project` | Record a deviation against a global catalog entry (idempotent upsert on `project+catalog+topic+key`) |
+| `POST /api/deviations/batch` | JWT + `X-Quorum-Project` | Batch deviation recording — up to 100 records; partial success via `Promise.allSettled` |
+| `GET /api/deviations` | JWT + `X-Quorum-Project` | List deviations; status computed via LATERAL join on `deviation_actions` |
+| `POST /api/deviations/:id/action` | JWT + `X-Quorum-Project` | Accept/deny/defer a deviation; PE/architect+ only (`enforceDeviationActionAuthority`) |
+| `GET /api/conformance` | JWT + `X-Quorum-Project` | Conformance scorecard: score, status, breakdown, scan_count, last_scan_at |
+| `GET /api/portfolio` | JWT (exec roles or admin) | Portfolio view: per-project scores + weighted rollup; filtered by `node_id` for sub-tree views |
+| `GET /api/bump/:topic/:key` | JWT + `X-Quorum-Project` | Confidence endorsement; 7-day cooldown per author; role-weighted delta; capped at `starting_confidence` |
 | `GET /.well-known/oauth-authorization-server` | — | RFC8414 OAuth metadata discovery |
 | `GET /.well-known/jwks.json` | — | JWKS endpoint for JWT verification |
