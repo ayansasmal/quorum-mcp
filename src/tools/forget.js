@@ -27,7 +27,7 @@ import {
 export const schema = z.object({
   topic: z.string().min(1),
   key: z.string().min(1),
-  reason: z.string().min(1).describe('Required: why this knowledge is being deprecated'),
+  reason: z.string().min(10, 'Reason must be at least 10 characters — placeholders like "ok" or "tbd" are not accepted').describe('Required: why this knowledge is being deprecated (≥ 10 characters)'),
   session_id: z.string().optional(),
 })
 

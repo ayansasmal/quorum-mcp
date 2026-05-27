@@ -288,3 +288,41 @@ describe('forget — happy path', () => {
     expect(result.status).toBe('deprecated')
   })
 })
+
+// ── Zod schema validation (schema-layer, no handler invocation) ───────────────
+//
+// These tests verify that the tool's Zod schema enforces the same constraints as
+// the constitutional layer, so callers receive a clear Zod validation error rather
+// than a ConstitutionalViolation thrown deep inside the handler.
+//
+// FAILING TESTS (TDD): forget.js currently uses z.string().min(1) for `reason`.
+// The fix is z.string().min(10, ...) to align with enforceReasonRequired's 10-char floor.
+// Once the fix is applied these tests will pass.
+
+describe('forget — Zod schema pre-validation (TDD: fails until min(1) → min(10) fix)', () => {
+  it('schema rejects reason shorter than 10 chars with Zod error (not ConstitutionalViolation)', async () => {
+    const { schema } = await import('../../src/tools/forget.js')
+    const result = schema.safeParse({ topic: 'auth', key: 'x', reason: 'too short' })
+    // 'too short' is 9 chars — below the 10-char constitutional floor.
+    // Once min(10) is applied, safeParse returns success:false with a ZodError.
+    expect(result.success).toBe(false)
+    if (!result.success) {
+      const reasonIssue = result.error.issues.find(i => i.path.includes('reason'))
+      expect(reasonIssue).toBeDefined()
+    }
+  })
+
+  it('schema rejects single-char reason', async () => {
+    const { schema } = await import('../../src/tools/forget.js')
+    const result = schema.safeParse({ topic: 'auth', key: 'x', reason: 'x' })
+    expect(result.success).toBe(false)
+  })
+
+  it('schema accepts reason that meets the 10-char floor', async () => {
+    const { schema } = await import('../../src/tools/forget.js')
+    const result = schema.safeParse({
+      topic: 'auth', key: 'x', reason: 'Replaced by new OAuth approach',
+    })
+    expect(result.success).toBe(true)
+  })
+})

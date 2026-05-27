@@ -55,16 +55,21 @@ function sanitizeContent(s) {
  * @param {string} taskSummary
  * @param {string[]} decisionsMade
  * @param {string[]} patternsUsed
+ * @param {string[]} constraints - Constraints discovered during the task (forwarded to LLM prompt)
  * @param {import('../gateway/client.js').GatewayClient} gw
  * @returns {Promise<{ items: ExtractedItem[], llmUnavailable: boolean }>}
  */
-async function extractKnowledge(taskSummary, decisionsMade = [], patternsUsed = [], gw) {
+async function extractKnowledge(taskSummary, decisionsMade = [], patternsUsed = [], constraints = [], gw) {
   try {
-    const result = await gw._post('/governance/extract', {
+    const body = {
       task_summary: taskSummary,
       decisions_made: decisionsMade,
       patterns_used: patternsUsed,
-    })
+    }
+    if (constraints.length > 0) {
+      body.constraints = constraints
+    }
+    const result = await gw._post('/governance/extract', body)
     return { items: result.items ?? [], llmUnavailable: false }
   } catch (err) {
     const isNotImplemented = err.message?.includes('404') || err.message?.includes('501')
@@ -119,6 +124,7 @@ export async function handler(pg, input, identity, ctx) {
         input.task_summary,
         input.decisions_made ?? [],
         input.patterns_used ?? [],
+        input.constraints ?? [],
         pg,
       )
 

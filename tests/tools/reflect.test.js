@@ -255,3 +255,80 @@ describe('reflect — duplicate detection', () => {
     expect(result.stored).toBe(1)
   })
 })
+
+// ── constraints forwarding (TDD: fails until extractKnowledge() is updated) ──
+//
+// reflect() accepts a 'constraints' field in its schema but currently the
+// extractKnowledge() function does NOT forward it to gw._post('/governance/extract').
+// These tests document the expected behaviour after the fix.
+//
+// The fix: pass constraints to extractKnowledge() and include them in the
+// POST /governance/extract body so the LLM prompt builder can incorporate them.
+
+describe('reflect — constraints forwarding (TDD: fails until extractKnowledge fix)', () => {
+  afterEach(() => vi.clearAllMocks())
+
+  it('forwards constraints to POST /governance/extract when provided', async () => {
+    const gw = makeGatewayClient([makeItem()])
+    const { handler: rememberHandler } = await import('../../src/tools/remember.js')
+    vi.mocked(rememberHandler).mockResolvedValue({ status: 'stored' })
+
+    const { handler } = await import('../../src/tools/reflect.js')
+    await handler(gw, {
+      task_summary:   'Implement auth strategy for Lambda services',
+      decisions_made: ['Use JWT for Lambda'],
+      patterns_used:  ['Stateless auth'],
+      constraints:    [
+        'All writes require tamper-evident audit trail',
+        'No hard deletes — append-only semantics',
+      ],
+      author: 'claude',
+    }, undefined, testCtx)
+
+    // gw._post is the stub capturing the extract call.
+    // After the fix, constraints must appear in the call body.
+    expect(gw._post).toHaveBeenCalledWith(
+      '/governance/extract',
+      expect.objectContaining({
+        constraints: [
+          'All writes require tamper-evident audit trail',
+          'No hard deletes — append-only semantics',
+        ],
+      }),
+    )
+  })
+
+  it('omits constraints key from extract body when constraints not provided', async () => {
+    const gw = makeGatewayClient([makeItem()])
+    const { handler: rememberHandler } = await import('../../src/tools/remember.js')
+    vi.mocked(rememberHandler).mockResolvedValue({ status: 'stored' })
+
+    const { handler } = await import('../../src/tools/reflect.js')
+    await handler(gw, {
+      task_summary: 'Implement auth strategy for Lambda',
+      author: 'claude',
+    }, undefined, testCtx)
+
+    // When no constraints supplied, the extract body should not include the key
+    // (avoids sending constraints: undefined to the gateway).
+    const postCall = gw._post.mock.calls.find(c => c[0] === '/governance/extract')
+    expect(postCall).toBeDefined()
+    expect(postCall[1]).not.toHaveProperty('constraints')
+  })
+
+  it('does not fail when constraints is empty array', async () => {
+    const gw = makeGatewayClient([makeItem()])
+    const { handler: rememberHandler } = await import('../../src/tools/remember.js')
+    vi.mocked(rememberHandler).mockResolvedValue({ status: 'stored' })
+
+    const { handler } = await import('../../src/tools/reflect.js')
+    const result = await handler(gw, {
+      task_summary: 'Implement auth strategy',
+      constraints:  [],
+      author: 'claude',
+    }, undefined, testCtx)
+
+    expect(result.stored).toBe(1)
+    expect(result.failed).toBe(0)
+  })
+})

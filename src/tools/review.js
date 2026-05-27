@@ -35,7 +35,7 @@ export const schema = z.object({
   action:     z.enum(['approve', 'reject', 'request_changes']),
   topic:      z.string().min(1).optional().describe('Target topic (required for DRAFT reviews; omit when using request_id)'),
   key:        z.string().min(1).optional().describe('Target key (required for DRAFT reviews; omit when using request_id)'),
-  note:       z.string().min(1).describe('Required: reason for this decision'),
+  note:       z.string().min(10, 'Note must be at least 10 characters — placeholders like "ok" or "LGTM" are not accepted').describe('Required: reason for this decision (≥ 10 characters)'),
   request_id: z.string().optional().describe('For deprecation requests: the request_id returned by pending()'),
   version:    z.number().int().positive().optional().describe('Specific version to review (defaults to latest DRAFT)'),
   session_id: z.string().optional(),

@@ -510,3 +510,39 @@ describe('review() — deprecation request: reject', () => {
     )
   })
 })
+
+// ── Zod schema validation (schema-layer, no handler invocation) ───────────────
+//
+// FAILING TESTS (TDD): review.js currently uses z.string().min(1) for `note`.
+// The fix is z.string().min(10, ...) to match enforceReasonRequired's 10-char floor.
+// These tests document the expected behaviour after the fix.
+
+describe('review — Zod schema pre-validation (TDD: fails until min(1) → min(10) fix)', () => {
+  it('schema rejects note shorter than 10 chars', async () => {
+    const { schema } = await import('../../src/tools/review.js')
+    const result = schema.safeParse({ action: 'approve', topic: 'auth', key: 'x', note: 'ok' })
+    // 'ok' is 2 chars — Zod should reject before reaching enforceReasonRequired.
+    expect(result.success).toBe(false)
+    if (!result.success) {
+      const noteIssue = result.error.issues.find(i => i.path.includes('note'))
+      expect(noteIssue).toBeDefined()
+    }
+  })
+
+  it('schema rejects 9-char note (one below the constitutional floor)', async () => {
+    const { schema } = await import('../../src/tools/review.js')
+    const result = schema.safeParse({
+      action: 'reject', topic: 'auth', key: 'x', note: 'too short',
+    })
+    expect(result.success).toBe(false)
+  })
+
+  it('schema accepts note that meets the 10-char floor', async () => {
+    const { schema } = await import('../../src/tools/review.js')
+    const result = schema.safeParse({
+      action: 'approve', topic: 'auth', key: 'x',
+      note: 'Reviewed and approved — meets the architectural standards',
+    })
+    expect(result.success).toBe(true)
+  })
+})
