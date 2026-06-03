@@ -32,6 +32,15 @@ Ask the human in **one prompt**:
 > 3. **Key domains** — any domain needing stricter governance e.g. `auth`, `payments`
 >    (optional — standard thresholds apply otherwise)
 > 4. **Gateway URL** — where Quorum gateway is running (default: `http://localhost:3001`)
+> 5. **Org hierarchy** — where does this project sit in your org tree? (used for portfolio rollup + cascade filters)
+>    - **Level**: `group` (business unit) | `division` (sub-group) | `department` | `service` (default — individual repo/service)
+>    - **Node ID**: dot- or slash-separated org-tree path, e.g. `eng/platform` (omit if root-level)
+>    - **Parent node ID**: the node_id of the parent, e.g. `eng` (omit for root projects)
+>    - **Display name**: human-readable label shown in the portfolio table, e.g. `Platform Team`
+>    - **Criticality**: integer 1–10 — business importance weight in the portfolio rollup (default: 1; use 5–10 for business-critical services)
+> 6. **Global catalogs** — are there shared standards to link to? (enables conformance scoring and deviation tracking)
+>    If yes: list the catalog `group_id` values, e.g. `security-standards`, `api-design-catalog`
+>    If none yet: leave blank — you can add this later via the Config editor.
 >
 Do not proceed until you have at least a project ID and one team member.
 
@@ -64,6 +73,14 @@ Write `<project_id>.quorum.json` (filename must match the `group_id` value):
     "engineer":            { "base_confidence": 0.70 },
     "junior":              { "base_confidence": 0.60 }
   },
+  "hierarchy": {
+    "level":        "service",
+    "node_id":      "<org-path>",
+    "parent":       "<parent-node-id>",
+    "display_name": "<display name>",
+    "criticality":  1
+  },
+  "globals": [],
   "domains": {},
   "thresholds": {
     "conflict_threshold": 0.85,
@@ -71,6 +88,18 @@ Write `<project_id>.quorum.json` (filename must match the `group_id` value):
   }
 }
 ```
+
+**Hierarchy field guide:**
+
+| Field | Values | Purpose |
+|-------|--------|---------|
+| `level` | `group` \| `division` \| `department` \| `service` | Controls which Portfolio cascade filter dropdown this project appears in. `service` is the default for individual repos. |
+| `node_id` | dot/slash path e.g. `eng/platform` | Org-tree position. Directors/VPs see only projects under their `node_id` subtree. |
+| `parent` | parent's `node_id` e.g. `eng` | Links this project into the hierarchy; omit for root-level group projects. |
+| `display_name` | `"Platform Team"` | Human-readable label shown in the portfolio table. |
+| `criticality` | integer 1–10 | Rollup weight: `Σ(score × criticality) / Σ(criticality)`. Business-critical services should use 5–10. |
+
+**`globals`** — list the `group_id` of any global catalog projects to link to (e.g. `["security-standards"]`). Leave as `[]` if none exist yet. This enables conformance scoring and deviation tracking against org-wide standards.
 
 `group_id` and `owner` are both required fields.
 - `group_id` — canonical identifier used as the S3 key, DDB primary key, and Graphiti namespace.
@@ -129,9 +158,11 @@ Extend the `<project_id>.quorum.json` created in Phase 3 with any of these optio
 
   // Organisational hierarchy — used by portfolio rollup to scope what directors/VPs see
   "hierarchy": {
-    "node_id": "eng/platform",          // dot- or slash-separated path in org tree
-    "parent":  "eng",                   // parent node_id (omit for root)
-    "display_name": "Platform Team"     // human-readable label
+    "level":        "service",          // 'group' | 'division' | 'department' | 'service'
+    "node_id":      "eng/platform",     // dot- or slash-separated path in org tree
+    "parent":       "eng",              // parent node_id (omit for root)
+    "display_name": "Platform Team",    // human-readable label in portfolio table
+    "criticality":  3                   // rollup weight 1–10 (default 1; use 5–10 for business-critical)
   },
 
   "members": [...],

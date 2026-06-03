@@ -528,8 +528,8 @@ Follow the full 10-phase protocol: [`references/onboarding.md`](references/onboa
 
 **Phase overview:**
 1. Check for existing setup (`.quorum` file) — hard-stop if already onboarded
-2. Gather team info — project ID (**hyphens only, no underscores**, e.g. `platform-team`), members, domains, gateway URL
-3. Create + validate `<group_id>.quorum.json` config — `group_id` must use `-` not `_`; `owner` (GitHub username) is **required**
+2. Gather team info — project ID (**hyphens only, no underscores**, e.g. `platform-team`), members, domains, gateway URL, org hierarchy (level/node_id/parent/display_name/criticality), global catalog links
+3. Create + validate `<group_id>.quorum.json` config — `group_id` must use `-` not `_`; `owner` (GitHub username) is **required**; `hierarchy` and `globals` must be set for conformance scoring to work
 4. Upload config via `config_upload({ config_path: "<id>.quorum.json" })` — save the `q_project_id` from the response
 5. Create `.quorum` discovery file (`quorum init`) and add the `q_project_id` from Phase 4
 6. Share install instructions with team (`npm install -g @as-quorum/mcp`)
