@@ -27,14 +27,19 @@ Run this before showing the question prompt so question 6 can list real options:
 
 ```bash
 GATEWAY_URL="${QUORUM_GATEWAY_URL:-http://localhost:3001}"
-curl -s "$GATEWAY_URL/api/globals" \
-  -H "Authorization: Bearer $QUORUM_JWT" 2>/dev/null
+HTTP_STATUS=$(curl -s -o /tmp/quorum-globals.json -w "%{http_code}" \
+  "$GATEWAY_URL/api/globals" -H "Authorization: Bearer $QUORUM_JWT" 2>/dev/null)
+echo "HTTP $HTTP_STATUS"
+cat /tmp/quorum-globals.json 2>/dev/null
 ```
 
-Parse the JSON response. For each entry extract `group_id`, `display_name`, and `global_scope`.
-If the call fails (no `QUORUM_JWT`, gateway down, or empty response) → skip gracefully and
-tell the engineer: *"I couldn't reach the gateway to list available catalogs. You can add
-`globals` to your config later via the Config editor, or set `QUORUM_JWT` and restart."*
+Handle the response by status:
+
+| Status | Action |
+|--------|--------|
+| `200` | Parse `/tmp/quorum-globals.json`. Extract `group_id`, `display_name`, `global_scope` per entry. Use the list in question 6. |
+| `401` | Call `authenticate()` via the MCP tool — token is missing or expired. Once auth completes, re-run the curl above and proceed. |
+| Any other error or empty response | Skip gracefully: tell the engineer *"Gateway unreachable — I can't list available catalogs. Add `globals` to your config later via the Config editor."* |
 
 **Step 2 — Ask the human in one prompt** (fill in the discovered catalog list for question 6):
 
@@ -195,8 +200,12 @@ Extend the `<project_id>.quorum.json` created in Phase 3 with any of these optio
 
 ```bash
 GATEWAY_URL="${QUORUM_GATEWAY_URL:-http://localhost:3001}"
-curl -s "$GATEWAY_URL/api/globals" -H "Authorization: Bearer $QUORUM_JWT"
+HTTP_STATUS=$(curl -s -o /tmp/quorum-globals.json -w "%{http_code}" \
+  "$GATEWAY_URL/api/globals" -H "Authorization: Bearer $QUORUM_JWT" 2>/dev/null)
+echo "HTTP $HTTP_STATUS" && cat /tmp/quorum-globals.json
 ```
+
+If HTTP 401 → call `authenticate()` via the MCP tool, then re-run the command above.
 
 This returns all `is_global: true` projects visible to your role. The `global_scope` field
 tells you the intended audience:
