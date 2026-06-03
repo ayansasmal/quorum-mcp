@@ -57,7 +57,7 @@ Handle the response by status:
 >    - **Node ID**: dot- or slash-separated org-tree path, e.g. `eng/platform` (omit if root-level)
 >    - **Parent node ID**: the node_id of the parent, e.g. `eng` (omit for root projects)
 >    - **Display name**: human-readable label shown in the portfolio table, e.g. `Platform Team`
->    - **Criticality**: integer 1–10 — business importance weight in the portfolio rollup (default: 1; use 5–10 for business-critical services)
+>    - **Criticality**: integer 1–10 — business importance weight in the portfolio rollup (default: 1; use 3–5 for business-critical services)
 > 6. **Global catalogs** — link to shared org standards to enable conformance scoring.
 >    Available catalogs (from Step 1 above):
 >    `<list group_id — display_name — global_scope for each discovered catalog>`
@@ -184,7 +184,7 @@ Extend the `<project_id>.quorum.json` created in Phase 3 with any of these optio
     "node_id":      "eng/platform",     // dot- or slash-separated path in org tree
     "parent":       "eng",              // parent node_id (omit for root)
     "display_name": "Platform Team",    // human-readable label in portfolio table
-    "criticality":  3                   // rollup weight 1–10 (default 1; use 5–10 for business-critical)
+    "criticality":  3                   // rollup weight 1–5 (default 1; use 3–5 for business-critical)
   },
 
   "members": [...],
