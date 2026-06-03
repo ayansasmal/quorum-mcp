@@ -10,9 +10,11 @@ What to store, what to skip, confidence floors, and domain conventions.
 |------|---------|---------|
 | **Decision** | Architectural or technical choice with rationale | "Use JWT over sessions — Lambda is stateless" |
 | **Pattern** | Reusable approach the team has adopted | "Error responses follow RFC 7807 Problem Detail" |
-| **Constraint** | Non-functional requirement or technical boundary | "Lambda functions cannot use persistent filesystem" |
+| **Constraint** | Hard non-negotiable limit — no exceptions | "Lambda functions cannot use persistent filesystem" |
+| **Standard** | Org-wide baseline measured by conformance scoring | "All services must expose GET /health" |
+| **Guideline** | Recommended practice — exceptions allowed with justification | "PRs should be under 400 lines" |
 | **Runbook** | Operational procedure or non-obvious fix | "Rotate KMS key: notify team 48h before, then..." |
-| **Requirement** | Business or technical requirement with acceptance criteria | "All API calls must complete within 300ms p99" |
+| **Requirement** | Business or product requirement with acceptance criteria | "Guest checkout must remain available" |
 
 ## What NOT to store
 
