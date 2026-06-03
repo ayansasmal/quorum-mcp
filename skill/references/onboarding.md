@@ -21,7 +21,22 @@ dashboard Config editor or `POST /sync/configs`.
 
 ## Phase 2 — Gather team information
 
-Ask the human in **one prompt**:
+**Step 1 — Discover available global catalogs (do this first, before asking questions)**
+
+Run this before showing the question prompt so question 6 can list real options:
+
+```bash
+GATEWAY_URL="${QUORUM_GATEWAY_URL:-http://localhost:3001}"
+curl -s "$GATEWAY_URL/api/globals" \
+  -H "Authorization: Bearer $QUORUM_JWT" 2>/dev/null
+```
+
+Parse the JSON response. For each entry extract `group_id`, `display_name`, and `global_scope`.
+If the call fails (no `QUORUM_JWT`, gateway down, or empty response) → skip gracefully and
+tell the engineer: *"I couldn't reach the gateway to list available catalogs. You can add
+`globals` to your config later via the Config editor, or set `QUORUM_JWT` and restart."*
+
+**Step 2 — Ask the human in one prompt** (fill in the discovered catalog list for question 6):
 
 > "To onboard this project I need:
 > 1. **Project ID** — short slug, **hyphens allowed, underscores not** e.g. `platform-team` (default: current directory name)
@@ -38,9 +53,11 @@ Ask the human in **one prompt**:
 >    - **Parent node ID**: the node_id of the parent, e.g. `eng` (omit for root projects)
 >    - **Display name**: human-readable label shown in the portfolio table, e.g. `Platform Team`
 >    - **Criticality**: integer 1–10 — business importance weight in the portfolio rollup (default: 1; use 5–10 for business-critical services)
-> 6. **Global catalogs** — are there shared standards to link to? (enables conformance scoring and deviation tracking)
->    If yes: list the catalog `group_id` values, e.g. `security-standards`, `api-design-catalog`
->    If none yet: leave blank — you can add this later via the Config editor.
+> 6. **Global catalogs** — link to shared org standards to enable conformance scoring.
+>    Available catalogs (from Step 1 above):
+>    `<list group_id — display_name — global_scope for each discovered catalog>`
+>    *(If none were discovered: you can add globals later via the Config editor.)*
+>    Which catalogs should this project link to? (comma-separated group_ids, or 'none')
 >
 Do not proceed until you have at least a project ID and one team member.
 
@@ -174,9 +191,11 @@ Extend the `<project_id>.quorum.json` created in Phase 3 with any of these optio
 
 **Step 2 — Discover available global catalogs**
 
+*(If you are adding federation after initial onboarding, the list may have changed — re-run discovery now. During initial onboarding this was already done in Phase 2 Step 1.)*
+
 ```bash
 GATEWAY_URL="${QUORUM_GATEWAY_URL:-http://localhost:3001}"
-curl -s -H "Authorization: Bearer <your-jwt>" "$GATEWAY_URL/api/globals"
+curl -s "$GATEWAY_URL/api/globals" -H "Authorization: Bearer $QUORUM_JWT"
 ```
 
 This returns all `is_global: true` projects visible to your role. The `global_scope` field
