@@ -648,7 +648,7 @@ describe('GatewayClient — typed endpoint wrappers', () => {
 
     const client = new GatewayClient('http://localhost:3001')
     const result = await client.insertPendingDecision({ conflict_id: 'q_c1', conflict_topic: 'auth' })
-    expect(result.conflict_id).toBe('q_c1')
+    expect(result).toBe('q_c1')
     expect(fetch.mock.calls[0][0]).toContain('/pg/pending')
     expect(fetch.mock.calls[0][1].method).toBe('POST')
   })

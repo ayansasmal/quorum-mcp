@@ -30,9 +30,9 @@ describe('M-05 Deviation & Conformance', () => {
     const result = await callTool(client, 'deviate', {
       catalog_id: 'quorum-test-catalog',
       topic: 'testing',
-      pattern: uid('m05-pattern'),
+      key: uid('m05-pattern'),
       description: 'Integration test: service missing structured logging as per standard.',
-      source: 'manual',
+      source: 'agent',
     });
 
     expect(result.isError).toBeFalsy();
@@ -47,16 +47,16 @@ describe('M-05 Deviation & Conformance', () => {
     const first = await callTool(client, 'deviate', {
       catalog_id: 'quorum-test-catalog',
       topic: 'testing',
-      pattern,
+      key: pattern,
       description: 'Idempotent deviation test: service not using agreed deployment strategy.',
-      source: 'scan',
+      source: 'code-review',
     });
     const second = await callTool(client, 'deviate', {
       catalog_id: 'quorum-test-catalog',
       topic: 'testing',
-      pattern,
+      key: pattern,
       description: 'Idempotent deviation test: service not using agreed deployment strategy.',
-      source: 'scan',
+      source: 'code-review',
     });
 
     expect(first.isError).toBeFalsy();
@@ -104,9 +104,9 @@ describe('M-05 Deviation & Conformance', () => {
       const result = await callTool(isoClient, 'deviate', {
         catalog_id: 'quorum-test-catalog',
         topic: 'testing',
-        pattern: uid('m05-not-linked'),
+        key: uid('m05-not-linked'),
         description: 'Testing deviation for project not linked to catalog.',
-        source: 'manual',
+        source: 'agent',
       });
 
       const body = JSON.stringify(result).toLowerCase();

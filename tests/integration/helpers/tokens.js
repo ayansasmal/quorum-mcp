@@ -14,6 +14,7 @@
 
 export {
   peToken as paToken,
+  pe2Token,
   engineerToken,
   architectToken,
   adminToken,

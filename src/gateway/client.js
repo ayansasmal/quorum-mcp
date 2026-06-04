@@ -323,7 +323,8 @@ export class GatewayClient {
   }
 
   async insertPendingDecision(decision) {
-    return this._post('/pg/pending', decision)
+    const row = await this._post('/pg/pending', decision)
+    return row?.conflict_id ?? row
   }
 
   async updatePendingDecision(conflictId, updates) {
@@ -603,6 +604,15 @@ export function setGatewayProfile(profile) {
  */
 export function getGatewayProfile() {
   return _runtimeProfile
+}
+
+/**
+ * Return the current Gateway-MCP token held in memory, or null if not set.
+ * Used by test helpers to snapshot and restore token state across nested client creations.
+ * @returns {string | null}
+ */
+export function getGatewayToken() {
+  return _runtimeToken
 }
 
 /** Reset singleton — for testing only. */

@@ -82,7 +82,7 @@ QUORUM_GATEWAY_URL=http://localhost:3001 npm run test:integration   # 6 files, 5
 
 **Shared validation module:** `src/shared/graph/validate.js` is a vendored copy of `gateway/src/shared/graph/validate.js`. Contains `validateKnowledgeInput(fields, opts)` and `ValidationError`. Must be manually synced when the canonical (gateway) copy changes.
 
-**GatewayClient** (`src/gateway/client.js`) is the only persistence interface the MCP uses. It implements typed methods — `getCurrentVersion()`, `insertVersion()`, `writeAuditEntry()`, etc. — that map to the gateway's `/pg/*` REST API. Every request carries a `Bearer` JWT and `X-Quorum-Project` header. Its `query()` method throws intentionally.
+**GatewayClient** (`src/gateway/client.js`) is the only persistence interface the MCP uses. It implements typed methods — `getCurrentVersion()`, `insertVersion()`, `writeAuditEntry()`, etc. — that map to the gateway's `/pg/*` REST API. Every request carries a `Bearer` JWT and `X-Quorum-Project` header. Its `query()` method throws intentionally. **Contract invariant:** `insertPendingDecision()` returns the `conflict_id` string (not the full row) — matches the raw-pg path in `queries.js` which also returns a string. The gateway's `POST /pg/pending` returns the full row; the client extracts `row.conflict_id` to maintain this contract.
 
 **Identity:** Resolved once per session (from JWT in gateway mode). Never accepted as tool input — server-side only.
 

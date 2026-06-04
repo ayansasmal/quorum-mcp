@@ -65,7 +65,7 @@ export function buildVersionRecord(params) {
     agent_id:    params.agentId    ?? null,
     session_id:  params.sessionId  ?? null,
     author_type: params.authorType ?? 'agent',
-    entity_type: params.entityType ?? null,
+    entity_type: params.entityType ?? 'Decision',
     // Backward link — set at creation time
     supersedes_version: params.supersedesVersion ?? null,
     supersedes_reason: params.supersedesReason ?? null,

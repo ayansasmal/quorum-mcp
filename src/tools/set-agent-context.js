@@ -39,6 +39,15 @@ export function getAgentCtx() {
 }
 
 /**
+ * Reset the agent context to null — for testing only.
+ * In production the MCP server is a stdio subprocess with a fresh module per session;
+ * in integration tests multiple createMcpServer() calls share the same module scope.
+ */
+export function _resetAgentCtx() {
+  _agentCtx = null
+}
+
+/**
  * @param {unknown} _pg  - not used (reads only)
  * @param {z.infer<typeof schema>} input
  * @returns {Promise<Record<string, unknown>>}

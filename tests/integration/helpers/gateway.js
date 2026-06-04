@@ -53,20 +53,21 @@ async function gw(method, path, token, project, body) {
  * @returns {Promise<{ status: number, data: any }>}
  */
 export async function activeEntry(token, project, { topic, key, content, entity_type = 'Decision' }) {
-  return gw('POST', '/pg/versions', token, project, {
+  const res = await gw('POST', '/pg/versions', token, project, {
     topic,
     key,
-    content,
+    summary: content,  // gateway validates req.body.summary for content field
     entity_type,
-    status: 'ACTIVE',
     triggered_by: 'integration-test-seed',
-    author: 'test-pe',
-    author_type: 'agent',
     agent_id: 'integration-seed',
     session_id: 'sess_test0000',
     confidence: 0.9,
     reason: 'Integration test seed entry',
   });
+  if (res.status !== 201) {
+    throw new Error(`activeEntry: ${res.status} - ${JSON.stringify(res.data)}`);
+  }
+  return res;
 }
 
 /**
@@ -112,6 +113,50 @@ export async function getEntry(token, project, key) {
 export async function getDeviations(token, project, params = {}) {
   const qs = new URLSearchParams(params).toString();
   return gw('GET', `/api/deviations${qs ? `?${qs}` : ''}`, token, project, undefined);
+}
+
+/**
+ * Seed a pending conflict record directly into pending_decisions via POST /pg/pending.
+ * First creates an ACTIVE entry at topic:key (so q_key_id exists), then inserts
+ * the conflict record with _conflict_parties in the enrichment for no-self-approval tests.
+ *
+ * The gateway pins `author` to the JWT sub of `token`, so callers that need a
+ * PA other than test-pe to be the existing author should pass `pe2Token()`.
+ *
+ * @param {string} token - PA JWT (must have ACTIVE write authority)
+ * @param {string} project
+ * @param {{ topic: string, key: string, existingContent: string, incomingContent: string, incomingAuthor?: string, reason?: string }} opts
+ * @returns {Promise<{ conflict_id: string }>}
+ */
+export async function conflictEntry(token, project, {
+  topic,
+  key,
+  existingContent,
+  incomingContent,
+  incomingAuthor = 'test-engineer',
+  reason = 'Integration test conflict for resolution path testing',
+}) {
+  await activeEntry(token, project, { topic, key, content: existingContent });
+
+  const res = await gw('POST', '/pg/pending', token, project, {
+    conflict_topic: topic,
+    conflict_key: key,
+    existing_content: existingContent,
+    incoming_content: incomingContent,
+    conflict_reason: reason,
+    active_version_at_creation: 1,
+    enrichment: {
+      _conflict_parties: {
+        incoming_author: incomingAuthor,
+      },
+    },
+  });
+
+  if (res.status !== 201) {
+    throw new Error(`conflictEntry: ${res.status} - ${JSON.stringify(res.data)}`);
+  }
+
+  return { conflict_id: res.data.conflict_id };
 }
 
 /**

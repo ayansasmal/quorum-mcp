@@ -39,7 +39,6 @@ import { getConfig } from '../config/loader.js'
 import {
   getCurrentVersion, getNextVersionNumber, insertVersion, transitionVersionStatus,
   countPendingForKey, insertPendingDecision, getPendingDecisionById, resolvePendingDecision,
-  incrementDomainStat,
 } from '../graph/queries.js'
 
 // GLOBAL_PROJECT_ID constant removed in v0.4 Wave A.
@@ -304,13 +303,7 @@ async function supersede(pg, input, existing, author, confidence, tags, triggere
     insertedVersionId = atomicResult?.new_version?.version_id
     insertedQKeyId    = atomicResult?.new_version?.q_key_id
 
-    // GAP-21: mark the superseded author's entry as superseded in their domain track record
-    incrementDomainStat(pg, {
-      author: existing.author,
-      domain: input.topic,
-      projectId,
-      field: 'superseded_count',
-    }).catch(() => {})
+
   } else {
     const inserted = await insertVersion(pg, { ...versionRecord, tags })
     insertedVersionId = inserted?.version_id
@@ -514,8 +507,10 @@ async function resolveConflictDecision(pg, input, identity, author, confidence, 
     return { status: 'not_found', message: `No pending conflict found with ID ${input.conflict_id}` }
   }
 
-  const topic = decision.conflict_topic
-  const key = decision.conflict_key
+  // conflict_topic/conflict_key come from a q_keys JOIN on GET /pg/pending/:id;
+  // fall back to input fields when the gateway omits the JOIN (older versions).
+  const topic = decision.conflict_topic ?? input.topic
+  const key = decision.conflict_key ?? input.key
   const existing = await getCurrentVersion(pg, topic, key, projectId)
 
   // Rule 4: No self-approval — conflict parties cannot resolve their own conflict.

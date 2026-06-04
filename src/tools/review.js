@@ -25,7 +25,7 @@ import { buildAuditVersionImpact, buildVersionRecord } from '../governance/prove
 import { KnowledgeStatus, TriggeredBy } from '../graph/schema.js'
 import {
   getCurrentVersion, getSpecificVersion, transitionVersionStatus,
-  getLatestDraftVersion, incrementDomainStat,
+  getLatestDraftVersion,
   getPendingDecisionById, resolvePendingDecision, getNextVersionNumber, insertVersion,
 } from '../graph/queries.js'
 import { deleteEpisodeSoft } from '../graph/client.js'
@@ -145,15 +145,7 @@ export async function handler(pg, input, identity, ctx) {
       const newStatus = input.action === 'approve' ? KnowledgeStatus.ACTIVE : KnowledgeStatus.REJECTED
       await transitionVersionStatus(pg, input.topic, input.key, targetVersion.version, newStatus, null, projectId)
 
-      // GAP-21: on approve, increment approved_count for the entry author in this domain
-      if (input.action === 'approve') {
-        incrementDomainStat(pg, {
-          author: targetVersion.author,
-          domain: input.topic,
-          projectId,
-          field: 'approved_count',
-        }).catch(() => {})
-      }
+
 
       return {
         result: {
@@ -234,8 +226,13 @@ async function handleDeprecationRequest(pg, input, identity, ctx) {
         }
       }
 
-      const topic = row.conflict_topic
-      const key   = row.conflict_key
+      // conflict_topic/conflict_key come from a q_keys JOIN on GET /pg/pending/:id;
+      // fall back to enrichment fields (stored by forget.js since v0.4) when absent.
+      const enrichment = typeof row.enrichment === 'string'
+        ? JSON.parse(row.enrichment)
+        : (row.enrichment ?? {})
+      const topic = row.conflict_topic ?? enrichment.topic
+      const key   = row.conflict_key   ?? enrichment.key
 
       if (input.action === 'approve') {
         const existing = await getCurrentVersion(pg, topic, key, projectId)

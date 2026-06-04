@@ -17,16 +17,13 @@ const TOPIC = 'identity-write-test';
 
 describe('M-01 Agent Identity & Write Lifecycle', () => {
   let paClient, paCleanup;
-  let engClient, engCleanup;
 
   beforeEach(async () => {
     ({ client: paClient, cleanup: paCleanup } = await createMcpClient({ token: paToken() }));
-    ({ client: engClient, cleanup: engCleanup } = await createMcpClient({ token: engineerToken() }));
   });
 
   afterEach(async () => {
     await paCleanup();
-    await engCleanup();
   });
 
   // ── Positive ──────────────────────────────────────────────────────────────────
@@ -50,20 +47,25 @@ describe('M-01 Agent Identity & Write Lifecycle', () => {
   });
 
   it('M-01.2 engineer remember without PA approval lands as DRAFT', async () => {
-    await callTool(engClient, 'set_agent_context', { agent_id: 'integration-eng' });
+    const { client: engClient, cleanup: engCleanup } = await createMcpClient({ token: engineerToken() });
+    try {
+      await callTool(engClient, 'set_agent_context', { agent_id: 'integration-eng' });
 
-    const key = uid('m01-eng-draft');
-    const result = await callTool(engClient, 'remember', {
-      topic: TOPIC,
-      key,
-      content: 'Engineer writes should land as DRAFT pending PA approval.',
-      reason: 'Testing engineer write path end to end',
-    });
+      const key = uid('m01-eng-draft');
+      const result = await callTool(engClient, 'remember', {
+        topic: TOPIC,
+        key,
+        content: 'Engineer writes should land as DRAFT pending PA approval.',
+        reason: 'Testing engineer write path end to end',
+      });
 
-    expect(result.isError).toBeFalsy();
-    const status = result.knowledge_status ?? result.status;
-    // Could be DRAFT, conflict_detected, or pending_approval — never ACTIVE for engineer
-    expect(status).not.toMatch(/^ACTIVE$/i);
+      expect(result.isError).toBeFalsy();
+      const status = result.knowledge_status ?? result.status;
+      // Could be DRAFT, conflict_detected, or pending_approval — never ACTIVE for engineer
+      expect(status).not.toMatch(/^ACTIVE$/i);
+    } finally {
+      await engCleanup();
+    }
   });
 
   it('M-01.3 agent_id persists through to session context (second write uses same session)', async () => {
@@ -103,9 +105,10 @@ describe('M-01 Agent Identity & Write Lifecycle', () => {
       reason: 'Establishing monorepo strategy decision',
     });
 
-    const recalled = await callTool(paClient, 'recall', { key });
+    const recalled = await callTool(paClient, 'recall', { topic: TOPIC, key });
     expect(recalled.isError).toBeFalsy();
-    const recalledContent = recalled.content ?? recalled.summary ?? recalled.text;
+    // recall returns XML for ACTIVE hits; callTool stores it in .raw when not JSON
+    const recalledContent = recalled.content ?? recalled.summary ?? recalled.text ?? recalled.raw;
     expect(recalledContent).toContain('Monorepo');
   });
 
@@ -153,8 +156,6 @@ describe('M-01 Agent Identity & Write Lifecycle', () => {
   });
 
   it('M-01.8 engineer write to global catalog → GLOBAL_WRITE_AUTHORITY error', async () => {
-    await callTool(engClient, 'set_agent_context', { agent_id: 'integration-eng' });
-
     // Use the quorum-test-catalog project (is_global: true)
     const { client: catalogClient, cleanup } = await createMcpClient({
       token: engineerToken(),

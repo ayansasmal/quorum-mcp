@@ -13,7 +13,7 @@
 
 import { z } from 'zod'
 import { withAuditPipeline } from '../audit/pipeline.js'
-import { getCurrentVersion, getVersionHistory, getVersionAtDate, getSpecificVersion, incrementDomainStat } from '../graph/queries.js'
+import { getCurrentVersion, getVersionHistory, getVersionAtDate, getSpecificVersion } from '../graph/queries.js'
 import { buildAuditVersionImpact } from '../governance/provenance.js'
 import { getConfig } from '../config/loader.js'
 
@@ -116,13 +116,6 @@ export async function handler(pg, input, identity, ctx) {
 
       if (!version) return { result: { status: 'not_found', topic: input.topic, key: input.key }, versionImpact: buildAuditVersionImpact([], []) }
 
-      // GAP-21: increment recalled_count for the author in this domain (fire-and-forget)
-      incrementDomainStat(pg, {
-        author: version.author,
-        domain: input.topic,
-        projectId,
-        field: 'recalled_count',
-      }).catch(() => {})
 
       return {
         result: formatVersion(version, { catalogId: fromCatalogId }),

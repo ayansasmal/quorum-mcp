@@ -248,8 +248,11 @@ export function registerTools(targetServer = server) {
         // Resolve gateway client from ctx URL (or env fallback inside getGatewayClient)
         const activePool = getGatewayClient(ctx?.gatewayUrl);
 
-        // Inject project scope — v0.3: project travels as X-Quorum-Project header, not JWT claim
-        if (activePool?.setProjectId) activePool.setProjectId(ctx?.projectId ?? null)
+        // Inject project scope — v0.3: project travels as X-Quorum-Project header, not JWT claim.
+        // Use groupId (hyphenated, e.g. 'my-project') not projectId (underscore-normalized for
+        // Graphiti/FalkorDB). The gateway's verify-jwt compares against profile.projects[].group_id
+        // which is always the hyphenated form; graphiti.js converts internally before FalkorDB calls.
+        if (activePool?.setProjectId) activePool.setProjectId(ctx?.groupId ?? ctx?.projectId ?? null)
 
         // Merge agent context into ctx for write tools
         const agentCtx = getAgentCtx()

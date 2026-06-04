@@ -50,7 +50,7 @@ describe('M-02 Read Path', () => {
   // ── Positive ──────────────────────────────────────────────────────────────────
 
   it('M-02.1 recall of existing ACTIVE key → summary matches written content', async () => {
-    const result = await callTool(client, 'recall', { key: activeKey });
+    const result = await callTool(client, 'recall', { topic: TOPIC, key: activeKey });
     expect(result.isError).toBeFalsy();
     const content = result.content ?? result.summary ?? result.text ?? JSON.stringify(result);
     expect(content).toContain('HTTP/2');
@@ -65,7 +65,7 @@ describe('M-02 Read Path', () => {
       reason: 'Testing history: adding a second version of this decision',
     });
 
-    const result = await callTool(client, 'recall', { key: activeKey, history: true });
+    const result = await callTool(client, 'recall', { topic: TOPIC, key: activeKey, history: true });
     expect(result.isError).toBeFalsy();
 
     const versions = result.versions ?? result.history ?? (Array.isArray(result) ? result : null);
@@ -98,7 +98,7 @@ describe('M-02 Read Path', () => {
 
   it('M-02.4 search with query matching seeded content → result includes project entry', async () => {
     const result = await callTool(client, 'search', {
-      q: 'HTTP/2 services communicate',
+      query: 'HTTP/2 services communicate',
     });
 
     expect(result.isError).toBeFalsy();
@@ -110,7 +110,7 @@ describe('M-02 Read Path', () => {
   // ── Negative ──────────────────────────────────────────────────────────────────
 
   it('M-02.5 recall DRAFT-only key → not found / empty (getCurrentVersion returns ACTIVE only)', async () => {
-    const result = await callTool(client, 'recall', { key: draftOnlyKey });
+    const result = await callTool(client, 'recall', { topic: TOPIC, key: draftOnlyKey });
     const body = JSON.stringify(result).toLowerCase();
     // Should either return not found or an empty result — never the draft content as ACTIVE
     expect(body).toMatch(/not.found|empty|no.active|no.*version|null/i);

@@ -17,7 +17,6 @@ const TOPIC = 'deprecation-test';
 
 describe('M-04 Deprecation Paths', () => {
   let paClient, paCleanup;
-  let engClient, engCleanup;
 
   // Seed a shared ACTIVE entry in beforeAll for some tests
   let sharedKey;
@@ -34,14 +33,10 @@ describe('M-04 Deprecation Paths', () => {
   beforeEach(async () => {
     ({ client: paClient, cleanup: paCleanup } = await createMcpClient({ token: paToken() }));
     await callTool(paClient, 'set_agent_context', { agent_id: 'integration-pa' });
-
-    ({ client: engClient, cleanup: engCleanup } = await createMcpClient({ token: engineerToken() }));
-    await callTool(engClient, 'set_agent_context', { agent_id: 'integration-eng' });
   });
 
   afterEach(async () => {
     await paCleanup();
-    await engCleanup();
   });
 
   // ── Positive ──────────────────────────────────────────────────────────────────
@@ -55,6 +50,7 @@ describe('M-04 Deprecation Paths', () => {
     });
 
     const result = await callTool(paClient, 'forget', {
+      topic: TOPIC,
       key,
       reason: 'This decision is superseded by newer architecture choices',
     });
@@ -62,7 +58,7 @@ describe('M-04 Deprecation Paths', () => {
     expect(result.isError).toBeFalsy();
 
     // Verify via recall — DEPRECATED entry should not be returned as ACTIVE
-    const recalled = await callTool(paClient, 'recall', { key });
+    const recalled = await callTool(paClient, 'recall', { topic: TOPIC, key });
     const body = JSON.stringify(recalled).toLowerCase();
     // Either not found, or status is deprecated
     expect(body).toMatch(/deprecated|not.found|no.active|empty/i);
@@ -76,15 +72,23 @@ describe('M-04 Deprecation Paths', () => {
       content: 'Decision that engineer wants to deprecate.',
     });
 
-    const result = await callTool(engClient, 'forget', {
-      key,
-      reason: 'This decision is no longer applicable to our current architecture',
-    });
+    const { client: engClient, cleanup: engCleanup } = await createMcpClient({ token: engineerToken() });
+    try {
+      await callTool(engClient, 'set_agent_context', { agent_id: 'integration-eng' });
 
-    expect(result.isError).toBeFalsy();
-    // Engineer forget should queue a request, not immediately deprecate
-    const body = JSON.stringify(result);
-    expect(body).toMatch(/request_id|pending|queued|submitted|deprecation/i);
+      const result = await callTool(engClient, 'forget', {
+        topic: TOPIC,
+        key,
+        reason: 'This decision is no longer applicable to our current architecture',
+      });
+
+      expect(result.isError).toBeFalsy();
+      // Engineer forget should queue a request, not immediately deprecate
+      const body = JSON.stringify(result);
+      expect(body).toMatch(/request_id|pending|queued|submitted|deprecation/i);
+    } finally {
+      await engCleanup();
+    }
   });
 
   it('M-04.3 pending() shows deprecation request in deprecation_requests[]', async () => {
@@ -95,10 +99,18 @@ describe('M-04 Deprecation Paths', () => {
       content: 'Decision pending deprecation review.',
     });
 
-    await callTool(engClient, 'forget', {
-      key,
-      reason: 'Engineer requesting deprecation of this outdated decision',
-    });
+    const { client: engClient, cleanup: engCleanup } = await createMcpClient({ token: engineerToken() });
+    try {
+      await callTool(engClient, 'set_agent_context', { agent_id: 'integration-eng' });
+
+      await callTool(engClient, 'forget', {
+        topic: TOPIC,
+        key,
+        reason: 'Engineer requesting deprecation of this outdated decision',
+      });
+    } finally {
+      await engCleanup();
+    }
 
     const pending = await callTool(paClient, 'pending', {});
     const requests = pending.deprecation_requests ?? pending.decisions ?? [];
@@ -114,18 +126,27 @@ describe('M-04 Deprecation Paths', () => {
       content: 'Decision to be approved for deprecation.',
     });
 
-    const forgetResult = await callTool(engClient, 'forget', {
-      key,
-      reason: 'This decision has been superseded by our new approach',
-    });
+    let request_id;
+    const { client: engClient, cleanup: engCleanup } = await createMcpClient({ token: engineerToken() });
+    try {
+      await callTool(engClient, 'set_agent_context', { agent_id: 'integration-eng' });
 
-    const request_id = forgetResult.request_id ?? forgetResult.id;
-    expect(request_id).toBeTruthy();
+      const forgetResult = await callTool(engClient, 'forget', {
+        topic: TOPIC,
+        key,
+        reason: 'This decision has been superseded by our new approach',
+      });
+
+      request_id = forgetResult.request_id ?? forgetResult.id;
+      expect(request_id).toBeTruthy();
+    } finally {
+      await engCleanup();
+    }
 
     const reviewResult = await callTool(paClient, 'review', {
       request_id,
       action: 'approve',
-      reason: 'Decision is indeed superseded — approving deprecation request',
+      note: 'Decision is indeed superseded — approving deprecation request',
     });
 
     expect(reviewResult.isError).toBeFalsy();
@@ -137,6 +158,7 @@ describe('M-04 Deprecation Paths', () => {
 
   it('M-04.5 forget non-existent key → graceful error (not crash)', async () => {
     const result = await callTool(paClient, 'forget', {
+      topic: TOPIC,
       key: `nonexistent-key-${Date.now()}`,
       reason: 'Attempting to deprecate a key that does not exist',
     });
@@ -148,6 +170,7 @@ describe('M-04 Deprecation Paths', () => {
 
   it('M-04.6 forget with reason < 10 chars → REASON_REQUIRED error', async () => {
     const result = await callTool(paClient, 'forget', {
+      topic: TOPIC,
       key: sharedKey,
       reason: 'Short',
     });
@@ -167,12 +190,14 @@ describe('M-04 Deprecation Paths', () => {
 
     // First deprecation — should succeed
     await callTool(paClient, 'forget', {
+      topic: TOPIC,
       key,
       reason: 'First deprecation of this decision entry',
     });
 
     // Second deprecation — should fail
     const second = await callTool(paClient, 'forget', {
+      topic: TOPIC,
       key,
       reason: 'Attempting to deprecate an already deprecated entry',
     });
@@ -191,6 +216,7 @@ describe('M-04 Deprecation Paths', () => {
       await callTool(wrongClient, 'set_agent_context', { agent_id: 'integration-eng-wrong-proj' });
 
       const result = await callTool(wrongClient, 'forget', {
+        topic: TOPIC,
         key: `nonexistent-in-peer-${Date.now()}`,
         reason: 'Attempting to forget a key in the wrong project scope',
       });

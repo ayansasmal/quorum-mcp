@@ -84,6 +84,7 @@ export async function handler(pg, input, identity, ctx) {
         })
         const duplicate = allRequests.find((r) => {
           if ((r.decision_type ?? 'conflict') !== 'deprecation_request') return false
+          if (r.conflict_key !== input.key) return false
           const enrich = typeof r.enrichment === 'string'
             ? JSON.parse(r.enrichment)
             : (r.enrichment ?? {})
@@ -109,7 +110,7 @@ export async function handler(pg, input, identity, ctx) {
           existing_content: existing.summary ?? existing.content ?? null,
           active_version_at_creation: existing.version,
           conflict_reason: input.reason,
-          enrichment: { requestor: author },
+          enrichment: { requestor: author, topic: input.topic, key: input.key },
           project_id: projectId,
         })
 

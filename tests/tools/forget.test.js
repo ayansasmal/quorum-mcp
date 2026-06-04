@@ -74,7 +74,7 @@ describe('forget — non-PE queuing path', () => {
         conflict_reason: 'Replaced by new OAuth approach with PKCE',
         existing_content: 'Use JWT for Lambda',
         active_version_at_creation: 3,
-        enrichment: { requestor: 'junior-dev' },
+        enrichment: expect.objectContaining({ requestor: 'junior-dev' }),
       }),
     )
   })
@@ -102,6 +102,7 @@ describe('forget — non-PE queuing path', () => {
       {
         conflict_id: 'q_c3',
         decision_type: 'deprecation_request',
+        conflict_key: 'token-strategy',
         enrichment: { requestor: 'junior-dev' },
       },
     ])
