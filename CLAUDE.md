@@ -44,6 +44,18 @@ cli.js                    — quorum init / quorum install (--skip-mcp / --skip-
 hooks/                    — 5 Claude Code hook scripts (bundled with npm; installed to ~/.claude/hooks/)
 skill/                    — SKILL.md + references/ (bundled with npm package)
 dist/                     — Compiled output (esbuild, gitignored)
+tests/integration/        — MCP integration tests (require running gateway); excluded from npm test
+  helpers/tokens.js       — JWT factories (re-exports from quorum/tests/e2e/helpers/jwt.js)
+  helpers/gateway.js      — HTTP seed helpers (activeEntry, draftEntry, uid) — uses Node fetch
+  helpers/mcp-client.js   — createMcpClient() + callTool() via InMemoryTransport + createMcpServer()
+  M-01-*.test.js          — Identity & write lifecycle (OwnScore 200 ⛔)
+  M-02-*.test.js          — Read path: recall + search (OwnScore 54)
+  M-03-*.test.js          — Conflict detection round-trip (OwnScore 240 ⛔, FailureCost 655)
+  M-04-*.test.js          — Deprecation paths (OwnScore 101 ⛔)
+  M-05-*.test.js          — Deviation & conformance (OwnScore 36)
+  M-06-*.test.js          — MCP protocol contracts (OwnScore 24)
+docs/MCP-TEST-PLAN.md     — Risk-weighted test plan for integration suite (OwnScore 655, 6 journeys)
+docs/journey-story-04-06-2026-mcp.md — Journey narratives for J-MCP-01 through J-MCP-06
 ```
 
 ---
@@ -54,9 +66,12 @@ dist/                     — Compiled output (esbuild, gitignored)
 npm run build:all    # compile src/server.js + cli.js → dist/
 npm run dev          # node --watch src/server.js (uncompiled, for local dev)
 npm run start        # run compiled dist/server.js
-npm test             # run all tests (36 files, 559 tests)
+npm test             # run all unit tests (38 files, 629 tests) — excludes integration tests
 npm test -- --coverage  # with v8 coverage report (75% threshold: lines, branches, functions)
 npm run test:constitutional  # Layer 1 only (blocking CI gate)
+
+# Integration tests — require a running gateway (QUORUM_GATEWAY_URL must be set):
+QUORUM_GATEWAY_URL=http://localhost:3001 npm run test:integration   # 6 files, 54 leaves
 ```
 
 ---
@@ -70,6 +85,8 @@ npm run test:constitutional  # Layer 1 only (blocking CI gate)
 **GatewayClient** (`src/gateway/client.js`) is the only persistence interface the MCP uses. It implements typed methods — `getCurrentVersion()`, `insertVersion()`, `writeAuditEntry()`, etc. — that map to the gateway's `/pg/*` REST API. Every request carries a `Bearer` JWT and `X-Quorum-Project` header. Its `query()` method throws intentionally.
 
 **Identity:** Resolved once per session (from JWT in gateway mode). Never accepted as tool input — server-side only.
+
+**`createMcpServer()` export:** `src/server.js` exports `createMcpServer()` (creates fresh `McpServer` + calls `registerTools(s)`) and `registerTools(targetServer = server)` (parameterised — defaults to module-level singleton). These are used by integration tests; `startup()` continues to use the singleton unchanged. `resolveCtx(mcpServer)` is also parameterised — integration tests hit env fallback (path 3) because InMemoryTransport client doesn't serve `listRoots`.
 
 **v0.4 Wave A (complete):** Constitutional + DB Foundation — `enforceGlobalWriteAuthority` (lifts GAP-27 soft-return to constitutional throw; config-driven via `getConfig()?.is_global`), `enforceDeviationActionAuthority`, `enforceValidDeferDeadline`; `DeviationStatus`, `DeviationActionType`, `VALID_DEFER_DAYS` in `src/graph/schema.js`; `QuorumConfigSchema` extended with `hierarchy`, `is_global`, `global_scope`, `is_public`, `globals`; executive roles (`director`, `vp_engineering`, `group_executive`) in `src/governance/authority.js`.
 
@@ -98,6 +115,11 @@ npm run test:constitutional  # Layer 1 only (blocking CI gate)
 - `skill/SKILL.md`: Conformance Scanning section — deviate(), conformance(), quorum:scan orchestration (when to call each, return value tables, pending() deviation handling); updated quick reference; references/scan.md added to references table
 - `README.md`: tool count 12→14; test count 559→620 (37 files); 14-tool table with set_agent_context + deviate + conformance; v0.4 governance rules table; updated project structure tools list
 - Wave B source fixes (entity_type preservation): `graph/client.js` — export normalizeGroupId, fix searchNodes/searchFacts for groupIds[]; `governance/provenance.js` — pass entity_type through buildVersionRecord; `tools/forget.js` + `tools/review.js` — preserve entity_type on DEPRECATED version record
+
+**Post-Wave-G additions (complete):**
+- `src/graph/schema.js`: `Standard` entity type added — org-wide baseline measured by conformance scoring; properties: `scope`, `rationale`, `exception_process`, `domain`. `Guideline` entity type added — recommended practice with allowed exceptions; properties: `rationale`, `when_to_deviate`, `domain`. Both synced from canonical `gateway/src/shared/graph/schema.js`. `Standard` is the preferred type for global catalog entries.
+- Hierarchy `org` tier: valid levels in `HierarchySchema` now `org → group → division → department → service` (5 levels). Synced from gateway `QuorumConfigSchema`.
+- `src/config/schema.js`: `base_confidence` field added to `MemberSchema` (required for `POST /config/upload` alignment with gateway validation).
 
 **Agent identity (v0.3):** `set_agent_context({ agent_id })` is Gate 3 — must be called before any write tool (`remember`, `reflect`, `forget`, `review`). `agent_id` is validated as `^[a-z][a-z0-9-]{0,39}$`. `session_id` is derived server-side from `hash(PID + hrtime.bigint())` → `sess_` + 8 hex chars. `author_type` is always `'agent'` (never caller-supplied) — distinguishes agent MCP writes from human dashboard writes (`author_type: 'human'` on all dashboard create/promote/supersede/deprecate actions). All three fields are written to `knowledge_versions.agent_id`, `.session_id`, `.author_type` via `buildVersionRecord()`.
 

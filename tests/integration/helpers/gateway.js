@@ -1,0 +1,126 @@
+/**
+ * HTTP seed helpers for MCP integration tests.
+ *
+ * These helpers call the gateway REST API directly (bypassing MCP) to seed
+ * database state before tests exercise the MCP tools. Uses Node 22 built-in
+ * fetch — no external HTTP library needed.
+ *
+ * All write operations use the /pg/versions admin bypass endpoint so seeds
+ * land as ACTIVE immediately without going through governance rules.
+ */
+
+const BASE = process.env.QUORUM_GATEWAY_URL ?? 'http://localhost:3001';
+export const TEST_PROJECT = 'quorum-test-project';
+export const PEER_PROJECT = 'quorum-test-peer-project';
+export const CATALOG_PROJECT = 'quorum-test-catalog';
+
+/**
+ * Make an authenticated HTTP request to the gateway.
+ *
+ * @param {string} method
+ * @param {string} path
+ * @param {string} token - Bearer JWT
+ * @param {string} project - X-Quorum-Project header value
+ * @param {object} [body]
+ * @returns {Promise<{ status: number, data: any }>}
+ */
+async function gw(method, path, token, project, body) {
+  const res = await fetch(`${BASE}${path}`, {
+    method,
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+      'X-Quorum-Project': project,
+    },
+    body: body != null ? JSON.stringify(body) : undefined,
+  });
+  const text = await res.text();
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    data = text;
+  }
+  return { status: res.status, data };
+}
+
+/**
+ * Seed an ACTIVE knowledge entry via the admin /pg/versions bypass.
+ *
+ * @param {string} token - Admin or PA JWT
+ * @param {string} project
+ * @param {{ topic: string, key: string, content: string, entity_type?: string }} opts
+ * @returns {Promise<{ status: number, data: any }>}
+ */
+export async function activeEntry(token, project, { topic, key, content, entity_type = 'Decision' }) {
+  return gw('POST', '/pg/versions', token, project, {
+    topic,
+    key,
+    content,
+    entity_type,
+    status: 'ACTIVE',
+    triggered_by: 'integration-test-seed',
+    author: 'test-pe',
+    author_type: 'agent',
+    agent_id: 'integration-seed',
+    session_id: 'sess_test0000',
+    confidence: 0.9,
+    reason: 'Integration test seed entry',
+  });
+}
+
+/**
+ * Seed a DRAFT knowledge entry via the /api/knowledge engineer endpoint.
+ *
+ * @param {string} token - Engineer JWT
+ * @param {string} project
+ * @param {{ topic: string, key: string, content: string }} opts
+ * @returns {Promise<{ status: number, data: any }>}
+ */
+export async function draftEntry(token, project, { topic, key, content }) {
+  return gw('POST', '/api/knowledge', token, project, {
+    topic,
+    key,
+    content,
+    entity_type: 'Decision',
+    triggered_by: 'integration-test-seed',
+    reason: 'Integration test draft entry',
+    confidence: 0.7,
+  });
+}
+
+/**
+ * GET the current ACTIVE version for a key.
+ *
+ * @param {string} token
+ * @param {string} project
+ * @param {string} key
+ * @returns {Promise<{ status: number, data: any }>}
+ */
+export async function getEntry(token, project, key) {
+  return gw('GET', `/api/knowledge/${encodeURIComponent(key)}`, token, project, undefined);
+}
+
+/**
+ * GET deviations for a project.
+ *
+ * @param {string} token
+ * @param {string} project
+ * @param {URLSearchParams|object} [params]
+ * @returns {Promise<{ status: number, data: any }>}
+ */
+export async function getDeviations(token, project, params = {}) {
+  const qs = new URLSearchParams(params).toString();
+  return gw('GET', `/api/deviations${qs ? `?${qs}` : ''}`, token, project, undefined);
+}
+
+/**
+ * Generate a unique key with a timestamp suffix.
+ * No cleanup needed — uid-prefixed keys are inert across test runs.
+ *
+ * @param {string} [prefix='test']
+ * @returns {string}
+ */
+export function uid(prefix = 'test') {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+}

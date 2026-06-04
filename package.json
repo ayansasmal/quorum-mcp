@@ -38,6 +38,7 @@
     "test:watch": "vitest",
     "test:constitutional": "vitest run tests/constitutional",
     "test:coverage": "vitest run --coverage",
+    "test:integration": "vitest run --config vitest.config.integration.js",
     "prepublishOnly": "npm run build:all",
     "prepare": "husky || true",
     "release": "commit-and-tag-version",

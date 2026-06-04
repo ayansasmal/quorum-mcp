@@ -24,7 +24,7 @@ import { log } from './logger.js';
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { createServer } from 'node:http';
+import { createServer as createHttpServer } from 'node:http';
 
 import { verifyChain, ChainIntegrityViolation } from './audit/chain.js';
 import { getAllEntries, countEntries } from './audit/secondary.js';
@@ -99,11 +99,11 @@ const tools = [
  *
  * @returns {Promise<{ projectId: string, groupId?: string, gatewayUrl: string } | null>}
  */
-async function resolveCtx() {
+async function resolveCtx(mcpServer = server) {
   // 1. Try MCP roots (Claude Code sends workspace dir per session — safe for parallel sessions)
   try {
     const result = await Promise.race([
-      server.server.listRoots(),
+      mcpServer.server.listRoots(),
       new Promise((_, reject) => setTimeout(() => reject(new Error('listRoots timeout')), 500)),
     ])
     for (const root of result.roots ?? []) {
@@ -180,16 +180,16 @@ function sanitizeErrorForClaude(err) {
  * authenticate() tool can inject a token at runtime and subsequent tool calls
  * transparently pick up the new gateway client.
  */
-export function registerTools() {
+export function registerTools(targetServer = server) {
   for (const { name, def } of tools) {
-    server.registerTool(name, { inputSchema: def.schema }, async input => {
+    targetServer.registerTool(name, { inputSchema: def.schema }, async input => {
       log.startCall(name)
       try {
         // Resolve fresh ctx on every call — stateless, no env mutation.
         // Each Claude Code session has its own MCP server process + stdio pipe,
         // so listRoots() returns this session's directory — safe for parallel sessions.
         log.info(`tool:${name}`, { input })
-        const ctx = await resolveCtx();
+        const ctx = await resolveCtx(targetServer);
 
         // Gate 1: no project context — .quorum file missing and no env fallback
         if (!ctx && name !== 'authenticate' && name !== 'config_upload') {
@@ -303,6 +303,18 @@ export function registerTools() {
   }
 }
 
+/**
+ * Create a fresh, isolated McpServer with all tools registered.
+ * Used by integration tests to get a clean server per test without touching
+ * the module-level singleton that startup() connects via stdio.
+ * @returns {McpServer}
+ */
+export function createMcpServer() {
+  const s = new McpServer({ name: 'quorum', version: '0.2.0' });
+  registerTools(s);
+  return s;
+}
+
 // ── Startup ────────────────────────────────────────────────────────────────────
 
 async function verifyStoreSync() {
@@ -401,7 +413,7 @@ async function startup() {
 function startHealthServer() {
   const port = parseInt(process.env.QUORUM_PORT ?? '8000', 10);
 
-  const httpServer = createServer(async (req, res) => {
+  const httpServer = createHttpServer(async (req, res) => {
     if (req.url !== '/health' && req.url !== '/') {
       res.writeHead(404);
       res.end('Not found');
