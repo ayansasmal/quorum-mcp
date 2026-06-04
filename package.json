@@ -39,6 +39,7 @@
     "test:constitutional": "vitest run tests/constitutional",
     "test:coverage": "vitest run --coverage",
     "test:integration": "vitest run --config vitest.config.integration.js",
+    "test:integration:docker": "docker compose -f ../quorum/docker-compose.e2e.yml run --rm mcp-test-runner",
     "prepublishOnly": "npm run build:all",
     "prepare": "husky || true",
     "release": "commit-and-tag-version",
@@ -60,6 +61,7 @@
     "commit-and-tag-version": "^12.7.3",
     "esbuild": "^0.25.0",
     "husky": "^9.1.7",
+    "jsonwebtoken": "^9.0.3",
     "vitest": "4.1.2"
   }
 }

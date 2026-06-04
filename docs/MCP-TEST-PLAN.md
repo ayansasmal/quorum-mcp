@@ -74,6 +74,23 @@ QUORUM_GATEWAY_URL=http://localhost:3001 npm run test:integration
 
 ---
 
+## Current Suite Status
+
+**As of 2026-06-05: 54/54 passing. 0 failures.**
+
+```
+ ✓ M-01-identity-write.test.js     (10 tests)
+ ✓ M-02-read-path.test.js          (9 tests)
+ ✓ M-03-conflict-round-trip.test.js (10 tests)
+ ✓ M-04-deprecation-paths.test.js  (9 tests)
+ ✓ M-05-deviation-conformance.test.js (8 tests)
+ ✓ M-06-protocol-contracts.test.js (8 tests)
+```
+
+**Last fix (2026-06-05):** M-04.4 — `GatewayClient.insertPendingDecision()` was returning the full row from `POST /pg/pending` instead of extracting `conflict_id`. The review tool received an object as `request_id`, failing MCP schema validation (`-32602 Input validation error: expected string, received object`). Fix: `return row?.conflict_id ?? row` in `src/gateway/client.js`. This maintained the duck-type contract with `queries.js`'s raw-pg path, which also returns a `conflict_id` string.
+
+---
+
 ## Scenario Scoring Table
 
 | ID | Journey | Leaves | F | W | Pillar | C | D | OwnScore | FailureCost | Gate |
