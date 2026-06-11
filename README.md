@@ -251,6 +251,32 @@ Coverage provider: v8 · Excluded from coverage pool: `server.js`, `quorum-file.
 
 ---
 
+## Documentation
+
+A curated index of the docs bundled with this package. (Backend gateway/dashboard docs live in the [`quorum`](../quorum/README.md) repo; the workspace-level index is at [`../README.md`](../README.md).)
+
+### Skill — installed into Claude Code
+
+| Doc | What's in it |
+|-----|--------------|
+| [skill/SKILL.md](skill/SKILL.md) | The Quorum skill — full MCP tool usage guide loaded into Claude Code |
+| [skill/references/tool-reference.md](skill/references/tool-reference.md) | Per-tool schemas and parameters for all 14 tools |
+| [skill/references/onboarding.md](skill/references/onboarding.md) | Connecting a project to a Quorum stack (login + federation setup) |
+| [skill/references/login.md](skill/references/login.md) | Authentication flow for the MCP server |
+| [skill/references/conflict-resolution.md](skill/references/conflict-resolution.md) | Resolving conflicts surfaced by `remember()` |
+| [skill/references/knowledge-guidelines.md](skill/references/knowledge-guidelines.md) | What makes good knowledge — writing guidance |
+| [skill/references/scan.md](skill/references/scan.md) | `quorum:scan` conformance scan orchestration |
+
+### Testing & internals
+
+| Doc | What's in it |
+|-----|--------------|
+| [docs/MCP-TEST-PLAN.md](docs/MCP-TEST-PLAN.md) | Risk-weighted MCP integration test plan — 6 journeys (M-01–M-06), 54 leaves, OwnScore 655 |
+| [docs/journey-story-04-06-2026-mcp.md](docs/journey-story-04-06-2026-mcp.md) | MCP integration journey narratives (J-MCP-01 … J-MCP-06) |
+| [src/prompts/](src/prompts/) | Editable LLM prompt templates — contradiction check, knowledge extraction, enrichment |
+
+---
+
 ## License
 
 Elastic License 2.0 — see [LICENSE](LICENSE). Self-hosting is permitted. You may not offer Quorum as a managed service or distribute modified copies.
