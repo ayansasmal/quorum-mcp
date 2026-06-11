@@ -12,6 +12,13 @@
  * through the gateway (/graphiti/*) instead of calling Graphiti directly.
  * The gateway injects the project claim as group_id automatically.
  *
+ * Vendored-copy note: the gateway's gateway/src/shared/graph/client.js is a
+ * copy of this file that runs INSIDE the gateway and reaches Graphiti directly.
+ * It intentionally omits the `log` import and the gateway-client JWT attach
+ * below — the gateway has no such modules. Keep that divergence when syncing;
+ * the request hardening (required groupId, 30s timeout, session-init checks)
+ * must stay identical in both copies.
+ *
  * MCP session protocol (streamable-http transport):
  *   1. POST /mcp with method="initialize" → server returns Mcp-Session-Id header
  *   2. All subsequent tool calls include that header
@@ -143,6 +150,7 @@ async function initSession(endpoint, authHeaders = {}) {
         clientInfo:      { name: 'quorum', version: '1.0' },
       },
     }),
+    signal: AbortSignal.timeout(30_000),
   })
 
   if (!res.ok) {
