@@ -73,7 +73,7 @@ function makeEntry(overrides = {}) {
     governance_json: { topic: 'auth', key: 'token' },
     outcome_json: { status: 'pending' },
     version_impact: { versions_created: [], versions_superseded: [] },
-    project_id: 'test-project',
+    q_project_id: 'test-project',
     ...overrides,
   }
 }
@@ -200,12 +200,12 @@ describe('getAllEntries', () => {
     expect(result).toEqual([])
   })
 
-  it('adds projectId filter', async () => {
+  it('adds qProjectId filter', async () => {
     const pg = { query: vi.fn().mockResolvedValue({ rows: [] }) }
     const { getAllEntries } = await import('../../src/audit/secondary.js')
-    await getAllEntries(pg, { projectId: 'my-project' })
+    await getAllEntries(pg, { qProjectId: 'my-project' })
     const sql = pg.query.mock.calls[0][0]
-    expect(sql).toContain('project_id')
+    expect(sql).toContain('q_project_id')
   })
 
   it('adds from filter', async () => {
@@ -235,7 +235,7 @@ describe('getAllEntries', () => {
   it('combines multiple filters', async () => {
     const pg = { query: vi.fn().mockResolvedValue({ rows: [{ entry_id: 'a' }] }) }
     const { getAllEntries } = await import('../../src/audit/secondary.js')
-    const result = await getAllEntries(pg, { projectId: 'proj', from: '2024-01-01', tool: 'recall' })
+    const result = await getAllEntries(pg, { qProjectId: 'proj', from: '2024-01-01', tool: 'recall' })
     expect(pg.query.mock.calls[0][0]).toContain('WHERE')
     expect(result).toHaveLength(1)
   })
@@ -262,11 +262,11 @@ describe('countEntries', () => {
     expect(result).toBe(10)
   })
 
-  it('counts with projectId filter', async () => {
+  it('counts with qProjectId filter', async () => {
     const pg = { query: vi.fn().mockResolvedValue({ rows: [{ count: 5 }] }) }
     const { countEntries } = await import('../../src/audit/secondary.js')
     const result = await countEntries(pg, 'my-project')
-    expect(pg.query.mock.calls[0][0]).toContain('project_id')
+    expect(pg.query.mock.calls[0][0]).toContain('q_project_id')
     expect(result).toBe(5)
   })
 })
