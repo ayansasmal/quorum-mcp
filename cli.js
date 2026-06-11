@@ -76,8 +76,15 @@ async function fetchTokenFromPAT(gatewayUrl) {
   })
 
   if (!res.ok) {
-    const body = await res.text()
-    console.error(`Error: Gateway auth failed (${res.status}): ${body}`)
+    // Redact the submitted PAT and any GitHub token patterns before printing —
+    // the gateway error body (and CI logs that capture stderr) must never expose
+    // the credential. Print the status and a scrubbed body for debuggability.
+    const raw = await res.text().catch(() => '')
+    const redacted = raw
+      .split(githubToken).join('[REDACTED]')
+      .replace(/gh[posu]_[A-Za-z0-9]+/g, '[REDACTED]')
+      .replace(/github_pat_[A-Za-z0-9_]+/g, '[REDACTED]')
+    console.error(`Error: Gateway auth failed (${res.status}). ${redacted || 'Check QUORUM_GITHUB_TOKEN and gateway URL.'}`)
     process.exit(1)
   }
 
