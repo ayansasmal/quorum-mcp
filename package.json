@@ -1,9 +1,31 @@
 {
   "name": "@as-quorum/mcp",
-  "version": "0.2.0",
+  "version": "0.0.1",
   "description": "Quorum MCP server — governed engineering memory for Claude Code and AI agents",
   "type": "module",
-  "license": "SEE LICENSE IN LICENSE",
+  "license": "Elastic-2.0",
+  "author": "Ayan Sasmal",
+  "homepage": "https://github.com/ayansasmal/quorum-mcp#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ayansasmal/quorum-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ayansasmal/quorum-mcp/issues"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "claude",
+    "claude-code",
+    "ai-agents",
+    "knowledge-management",
+    "governance",
+    "quorum"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "engines": {
     "node": ">=22.12.0"
   },
@@ -28,7 +50,7 @@
     "hooks/"
   ],
   "scripts": {
-    "build": "esbuild src/server.js --bundle --platform=node --format=esm --packages=external --outfile=dist/server.js",
+    "build": "esbuild src/server.js --bundle --platform=node --format=esm --packages=external --banner:js=\"#!/usr/bin/env node\" --outfile=dist/server.js",
     "build:cli": "esbuild cli.js --bundle --platform=node --format=esm --packages=external --outfile=dist/cli.js",
     "build:all": "npm run build && npm run build:cli",
     "dev": "node --watch src/server.js",

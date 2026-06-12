@@ -1,12 +1,16 @@
 #!/usr/bin/env node
 /**
- * postinstall.js — Runs automatically after `npm install -g @as-quorum/mcp`.
+ * postinstall.js — Claude Code setup routine invoked by `quorum install`
+ * (the `setup` script / `cli.js install`). NOT wired as an npm `postinstall`
+ * lifecycle hook: a global install deliberately does not auto-run this, so
+ * `npm i -g @as-quorum/mcp` never touches `~/.claude` without the explicit
+ * `quorum install` step documented in the README.
  *
  * Copies skill/ and hooks/ to ~/.claude, merges hook wiring into settings.json,
  * and registers the MCP server at user scope via `claude mcp add --scope user`.
  *
- * Exits 0 in all error cases so npm install never fails due to a Claude Code
- * setup issue.
+ * Exits 0 in all error cases so the install step never hard-fails due to a
+ * Claude Code setup issue.
  */
 
 import { cpSync, mkdirSync, existsSync } from 'node:fs'
