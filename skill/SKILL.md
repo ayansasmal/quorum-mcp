@@ -535,7 +535,7 @@ Follow the full 10-phase protocol: [`references/onboarding.md`](references/onboa
 6. Share install instructions with team (`npm install -g @as-quorum/mcp`)
 7. Verify own skill + hooks are present
 8. **Ingest existing knowledge** — CLAUDE.md, MEMORY.md, session transcripts → DRAFT entries
-9. Commit `.quorum` (config is gitignored — lives in S3); add `.quorum-reflected`, `.quorum-offline.log` to `.gitignore`
+9. Commit `.quorum` (config is gitignored — lives in S3); add `.quorum-session`, `.quorum-reflected`, `.quorum-offline.log` to `.gitignore`
 10. Verify connection with a fresh session
 
 **Phase 8 is the highest-value step** — it bootstraps the team's memory from institutional

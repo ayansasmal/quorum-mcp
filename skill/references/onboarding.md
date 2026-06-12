@@ -433,6 +433,7 @@ First, ensure runtime artifacts are gitignored:
 
 ```bash
 echo '*.quorum.json' >> .gitignore
+echo '.quorum-session' >> .gitignore
 echo '.quorum-reflected' >> .gitignore
 echo '.quorum-offline.log' >> .gitignore
 ```
