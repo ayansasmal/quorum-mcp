@@ -37,7 +37,7 @@ src/
   gateway/
     client.js             — Outbound HTTP client to gateway (NOT the gateway server)
   install/
-    hooks.js              — Hook script installer: copies hooks/, merges settings.json (idempotent)
+    hooks.js              — Hook inspector/repairer: exact-ID ownership, selective copies, atomic settings backup
   export/                 — markdown.js · confluence.js
   prompts/                — loader.js
 cli.js                    — quorum init / quorum install (--skip-mcp / --skip-skill / --skip-hooks) CLI
@@ -68,7 +68,7 @@ docs/superpowers/plans/2026-06-13-safe-hook-installation.md — TDD implementati
 npm run build:all    # compile src/server.js + cli.js → dist/
 npm run dev          # node --watch src/server.js (uncompiled, for local dev)
 npm run start        # run compiled dist/server.js
-npm test             # run all unit tests (38 files, 629 tests) — excludes integration tests
+npm test             # run all unit tests (41 files, 645 tests) — excludes integration tests
 npm test -- --coverage  # with v8 coverage report (75% threshold: lines, branches, functions)
 npm run test:constitutional  # Layer 1 only (blocking CI gate)
 

@@ -3,7 +3,7 @@
 **Governed engineering and business memory for Claude Code and AI agents.**
 
 [![npm](https://img.shields.io/npm/v/@as-quorum/mcp?label=%40as-quorum%2Fmcp&color=cb0000&logo=npm)](https://www.npmjs.com/package/@as-quorum/mcp)
-[![Tests](https://img.shields.io/badge/tests-620%20passing-brightgreen?logo=vitest&logoColor=white)](https://github.com/ayansasmal/quorum-mcp)
+[![Tests](https://img.shields.io/badge/tests-645%20passing-brightgreen?logo=vitest&logoColor=white)](https://github.com/ayansasmal/quorum-mcp)
 [![Coverage — Lines](https://img.shields.io/badge/lines-86%25-brightgreen)](https://github.com/ayansasmal/quorum-mcp)
 [![Coverage — Branches](https://img.shields.io/badge/branches-79%25-brightgreen)](https://github.com/ayansasmal/quorum-mcp)
 [![Node](https://img.shields.io/badge/node-%3E%3D22-brightgreen?logo=nodedotjs&logoColor=white)](https://nodejs.org)
@@ -142,8 +142,17 @@ npx @as-quorum/mcp install
 
 This installs three things:
 1. Copies the bundled skill to `~/.claude/skills/quorum/`
-2. Copies 5 Claude Code hook scripts to `~/.claude/hooks/` and wires them into `~/.claude/settings.json`
+2. Inspects and safely repairs 5 Claude Code hook scripts in `~/.claude/hooks/` plus their managed entries in `~/.claude/settings.json`
 3. Registers the MCP server with `claude mcp add`
+
+Hook installation is intentionally conservative:
+
+- A correct installation is reported as already installed and does not rewrite `settings.json`.
+- Missing, stale, or non-executable Quorum scripts are repaired automatically.
+- Missing or incorrect Quorum-owned settings entries are repaired automatically.
+- Unrelated settings, non-Quorum hooks, and unknown legacy Quorum hook IDs are preserved.
+- Before changed settings are atomically replaced, the previous file is copied to `settings.json.bak`.
+- Malformed JSON or an unsafe `hooks` structure aborts without changing scripts or settings.
 
 To skip individual steps:
 ```bash
@@ -179,7 +188,7 @@ src/
   gateway/
     client.js         — HTTP client: Bearer JWT + X-Quorum-Project header on every request
   install/
-    hooks.js          — Hook script installer
+    hooks.js          — Hook inspection, selective repair, backup, and atomic settings replacement
     postinstall.js    — registerMcpServer() via `claude mcp add --scope user`
   prompts/            — LLM prompt templates (editable Markdown)
 cli.js                — quorum CLI (init · install · audit · history)
@@ -204,7 +213,7 @@ npm install
 npm run build:all    # compile server + CLI → dist/
 npm run setup        # install skill, hooks, MCP (alias for: quorum install)
 npm run dev          # node --watch src/server.js (no build step needed for MCP server)
-npm test             # run all tests (37 files, 620 tests)
+npm test             # run all tests (41 files, 645 tests)
 npm test -- --coverage  # coverage report (lines 86%, branches 79%, functions 84%)
 ```
 
@@ -222,7 +231,7 @@ npm test -- --coverage  # coverage report (lines 86%, branches 79%, functions 84
 | Branches | **79%** | 75% |
 | Functions | **84%** | 75% |
 
-Test files: **37** · Tests: **620 passing**
+Test files: **41** · Tests: **645 passing**
 
 Coverage provider: v8 · Excluded from coverage pool: `server.js`, `quorum-file.js`, `prompts/loader.js`, `install/postinstall.js`, `config/loader.js` (S3/file I/O), `config/migrations.js` (DB schema migrations).
 
