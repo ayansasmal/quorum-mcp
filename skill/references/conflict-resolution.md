@@ -115,6 +115,7 @@ remember("auth", "token-strategy", "...", {
 
 ## Dashboard alternative
 
-The **Quorum dashboard** at `http://localhost:3002/pending` shows full conflict briefs
+The **Quorum dashboard** at `<QUORUM_DASHBOARD_URL>/pending` (the `QUORUM_DASHBOARD_URL`
+environment value; ask the human if unset) shows full conflict briefs
 with side-by-side diffs, LLM analysis, and decision buttons — no terminal required.
 This is the preferred review surface for non-Claude reviewers.

@@ -73,7 +73,7 @@ pending()    ← returns conflict_briefs and draft_reviews — handle them diffe
 | Return type | How to handle |
 |-------------|---------------|
 | `conflict_briefs` — unresolved conflicts | **Block on resolution before writing any code.** Present each conflict and get human decision. See Conflict Resolution section. |
-| `draft_reviews` — DRAFTs awaiting approval | **Do not block.** Note them: *"N DRAFT entries await your review at http://localhost:3002/pending."* Then continue. |
+| `draft_reviews` — DRAFTs awaiting approval | **Do not block.** Note them: *"N DRAFT entries await your review at <QUORUM_DASHBOARD_URL>/pending."* Then continue. |
 
 ---
 
@@ -253,7 +253,7 @@ reflect("concise task summary — what was built and why", {
 ```
 
 **After `reflect()` returns:**
-- Tell the human: *"I've submitted N knowledge entries to Quorum for your review at http://localhost:3002/pending."*
+- Tell the human: *"I've submitted N knowledge entries to Quorum for your review at <QUORUM_DASHBOARD_URL>/pending."*
 - If any entry returned `conflict_detected` → do not close the session silently. Brief the human on each conflict and resolve them the same way as a mid-task conflict. See Conflict Resolution section.
 - If any entry returned `stored_pending_conflict_check` → tell the human: *"Conflict check deferred for N entries — review at /pending once Graphiti is back."*
 
@@ -370,7 +370,7 @@ conformance({ include_details: true })
 
 | Section | Action |
 |---------|--------|
-| `open` count > 0 | Note: *"N deviations are open. Dashboard → http://localhost:3002/deviations"* — do not block the session |
+| `open` count > 0 | Note: *"N deviations are open. Dashboard → <QUORUM_DASHBOARD_URL>/deviations"* — do not block the session |
 | `overdue_deferrals` > 0 | Surface with urgency: *"N overdue deferrals need re-actioning — they are scoring at full weight until resolved"* |
 
 Deviations are informational at session start — they do not block the way unresolved conflicts do.
@@ -391,7 +391,7 @@ There is **no `portfolio()` MCP tool** — portfolio is dashboard-only.
 | `is_admin` | All projects org-wide |
 | All other roles | 403 Forbidden |
 
-**Dashboard:** `http://localhost:3002` → Stats page → ConformanceCard
+**Dashboard:** `<QUORUM_DASHBOARD_URL>` → Stats page → ConformanceCard
 
 **What the portfolio rollup shows:**
 - Per-project conformance score, status (CERTIFIED / UNCERTIFIED), and last scan metadata
@@ -458,9 +458,18 @@ remember("topic", "key", "resolved content", {
 ### Auth is always required
 
 The MCP server always routes through the Quorum Gateway — there is no direct
-mode. `QUORUM_GATEWAY_URL` defaults to `http://localhost:3001` and is registered
-automatically via `postinstall`. All Graphiti operations go through the gateway's
-`/graphiti/*` proxy, which requires a valid JWT + `X-Quorum-Project` header.
+mode. The gateway base URL is read from the `QUORUM_GATEWAY_URL` environment
+variable (set it in your MCP client config to your team's Quorum instance, e.g.
+`https://quorum-gateway.example.com`). If it is not set, ask the human for the
+gateway URL rather than assuming a default — installations differ per team. All
+Graphiti operations go through the gateway's `/graphiti/*` proxy, which requires
+a valid JWT + `X-Quorum-Project` header.
+
+The **dashboard URL** is read from the `QUORUM_DASHBOARD_URL` environment
+variable (e.g. `https://quorum-dashboard.example.com`). Whenever this guide
+points the human at a dashboard page (`<QUORUM_DASHBOARD_URL>/pending`,
+`/deviations`, etc.), substitute the configured value. If it is not set, ask the
+human for the dashboard URL rather than assuming a default.
 
 JWT required. Identity from GitHub OAuth → slim JWT `{ sub, is_admin }`.
 Override audit identity in CI with `QUORUM_AUTHOR=<github-username>`.
@@ -681,7 +690,7 @@ remember("topic", "key", "content", {
 ```
 
 All entries enter as `DRAFT`. Tell the human: *"Stored N entries as DRAFT —
-review them at http://localhost:3002/pending."*
+review them at <QUORUM_DASHBOARD_URL>/pending."*
 
 ---
 
@@ -795,8 +804,8 @@ deviate({
 # → recorded:   deviation created or last_seen_at updated
 ```
 
-**Review queue:** Dashboard → http://localhost:3002/pending (preferred for humans)
-**Deviations:** Dashboard → http://localhost:3002/deviations (PE action panel)
+**Review queue:** Dashboard → <QUORUM_DASHBOARD_URL>/pending (preferred for humans)
+**Deviations:** Dashboard → <QUORUM_DASHBOARD_URL>/deviations (PE action panel)
 
 ---
 

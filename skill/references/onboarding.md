@@ -21,14 +21,33 @@ dashboard Config editor or `POST /sync/configs`.
 
 ## Phase 2 — Gather team information
 
-**Step 1 — Discover available global catalogs (do this first, before asking questions)**
+**Step 0 — Resolve the gateway and dashboard URLs (do this first)**
 
-Run this before showing the question prompt so question 6 can list real options:
+Quorum installations differ per team — never assume `localhost`. Resolve each URL
+from the environment first; **only ask the human if it is not already set.**
 
 ```bash
-GATEWAY_URL="${QUORUM_GATEWAY_URL:-http://localhost:3001}"
+# Gateway URL — already provided via MCP config / env?
+echo "QUORUM_GATEWAY_URL=${QUORUM_GATEWAY_URL:-<unset>}"
+# Dashboard URL — already provided via env?
+echo "QUORUM_DASHBOARD_URL=${QUORUM_DASHBOARD_URL:-<unset>}"
+```
+
+| Variable | If set | If unset |
+|----------|--------|----------|
+| `QUORUM_GATEWAY_URL` | use it for every gateway call below | **Ask the human:** *"What is your Quorum gateway URL? (e.g. `https://quorum-gateway.yourco.com`)"* — then `export QUORUM_GATEWAY_URL="<answer>"` for this session. |
+| `QUORUM_DASHBOARD_URL` | use it for every dashboard link shown to humans | **Ask the human:** *"What is your Quorum dashboard URL? (e.g. `https://quorum-dashboard.yourco.com`)"* — then `export QUORUM_DASHBOARD_URL="<answer>"`. (Optional — skip if the team has no dashboard; omit dashboard links if so.) |
+
+Do not proceed to Step 1 until `QUORUM_GATEWAY_URL` resolves to a real value. There is
+no localhost default — a wrong gateway silently writes to the wrong stack.
+
+**Step 1 — Discover available global catalogs (before asking questions)**
+
+Run this before showing the question prompt so question 5 can list real options:
+
+```bash
 HTTP_STATUS=$(curl -s -o /tmp/quorum-globals.json -w "%{http_code}" \
-  "$GATEWAY_URL/api/globals" -H "Authorization: Bearer $QUORUM_JWT" 2>/dev/null)
+  "$QUORUM_GATEWAY_URL/api/globals" -H "Authorization: Bearer $QUORUM_JWT" 2>/dev/null)
 echo "HTTP $HTTP_STATUS"
 cat /tmp/quorum-globals.json 2>/dev/null
 ```
@@ -37,11 +56,11 @@ Handle the response by status:
 
 | Status | Action |
 |--------|--------|
-| `200` | Parse `/tmp/quorum-globals.json`. Extract `group_id`, `display_name`, `global_scope` per entry. Use the list in question 6. |
+| `200` | Parse `/tmp/quorum-globals.json`. Extract `group_id`, `display_name`, `global_scope` per entry. Use the list in question 5. |
 | `401` | Call `authenticate()` via the MCP tool — token is missing or expired. Once auth completes, re-run the curl above and proceed. |
 | Any other error or empty response | Skip gracefully: tell the engineer *"Gateway unreachable — I can't list available catalogs. Add `globals` to your config later via the Config editor."* |
 
-**Step 2 — Ask the human in one prompt** (fill in the discovered catalog list for question 6):
+**Step 2 — Ask the human in one prompt** (fill in the discovered catalog list for question 5):
 
 > "To onboard this project I need:
 > 1. **Project ID** — short slug, **hyphens allowed, underscores not** e.g. `platform-team` (default: current directory name)
@@ -51,14 +70,13 @@ Handle the response by status:
 >    (`principal_architect` | `senior_engineer` | `engineer` | `junior`)
 > 3. **Key domains** — any domain needing stricter governance e.g. `auth`, `payments`
 >    (optional — standard thresholds apply otherwise)
-> 4. **Gateway URL** — where Quorum gateway is running (default: `http://localhost:3001`)
-> 5. **Org hierarchy** — where does this project sit in your org tree? (used for portfolio rollup + cascade filters)
+> 4. **Org hierarchy** — where does this project sit in your org tree? (used for portfolio rollup + cascade filters)
 >    - **Level**: `group` (business unit) | `division` (sub-group) | `department` | `service` (default — individual repo/service)
 >    - **Node ID**: dot- or slash-separated org-tree path, e.g. `eng/platform` (omit if root-level)
 >    - **Parent node ID**: the node_id of the parent, e.g. `eng` (omit for root projects)
 >    - **Display name**: human-readable label shown in the portfolio table, e.g. `Platform Team`
 >    - **Criticality**: integer 1–10 — business importance weight in the portfolio rollup (default: 1; use 3–5 for business-critical services)
-> 6. **Global catalogs** — link to shared org standards to enable conformance scoring.
+> 5. **Global catalogs** — link to shared org standards to enable conformance scoring.
 >    Available catalogs (from Step 1 above):
 >    `<list group_id — display_name — global_scope for each discovered catalog>`
 >    *(If none were discovered: you can add globals later via the Config editor.)*
@@ -77,7 +95,7 @@ Write `<project_id>.quorum.json` (filename must match the `group_id` value):
 
 ```json
 {
-  "$schema": "http://localhost:3001/schema/config",
+  "$schema": "<QUORUM_GATEWAY_URL>/schema/config",
   "group_id": "<project_id>",
   "owner": "<github_username>",
   "members": [
@@ -138,7 +156,7 @@ Add domain overrides if provided:
 
 Validate before uploading:
 ```bash
-GATEWAY_URL="${QUORUM_GATEWAY_URL:-http://localhost:3001}"
+GATEWAY_URL="$QUORUM_GATEWAY_URL"
 curl -s -X POST "$GATEWAY_URL/config/validate" \
   -H "Content-Type: application/json" \
   -d @"${PROJECT_ID}.quorum.json"
@@ -167,7 +185,7 @@ Extend the `<project_id>.quorum.json` created in Phase 3 with any of these optio
 
 ```json
 {
-  "$schema": "http://localhost:3001/schema/config",
+  "$schema": "<QUORUM_GATEWAY_URL>/schema/config",
   "group_id": "<project_id>",
   "owner": "<github_username>",
 
@@ -199,7 +217,7 @@ Extend the `<project_id>.quorum.json` created in Phase 3 with any of these optio
 *(If you are adding federation after initial onboarding, the list may have changed — re-run discovery now. During initial onboarding this was already done in Phase 2 Step 1.)*
 
 ```bash
-GATEWAY_URL="${QUORUM_GATEWAY_URL:-http://localhost:3001}"
+GATEWAY_URL="$QUORUM_GATEWAY_URL"
 HTTP_STATUS=$(curl -s -o /tmp/quorum-globals.json -w "%{http_code}" \
   "$GATEWAY_URL/api/globals" -H "Authorization: Bearer $QUORUM_JWT" 2>/dev/null)
 echo "HTTP $HTTP_STATUS" && cat /tmp/quorum-globals.json
@@ -223,7 +241,7 @@ Add the relevant `group_id` values to the `globals` array in your config. Constr
 Re-validate after adding `globals`:
 
 ```bash
-GATEWAY_URL="${QUORUM_GATEWAY_URL:-http://localhost:3001}"
+GATEWAY_URL="$QUORUM_GATEWAY_URL"
 curl -s -X POST "$GATEWAY_URL/config/validate" \
   -H "Content-Type: application/json" \
   -d @"${PROJECT_ID}.quorum.json"
@@ -298,7 +316,7 @@ Then create the `.quorum` file:
 
 ```bash
 $QUORUM_CLI init \
-  --gateway-url "${QUORUM_GATEWAY_URL:-http://localhost:3001}" \
+  --gateway-url "$QUORUM_GATEWAY_URL" \
   --project-id "$PROJECT_ID"
 ```
 
@@ -309,7 +327,7 @@ from the Phase 4 response to enable fast routing (skips a DB lookup per request)
 # Use the exact JSON from the next_step field in the Phase 4 response, e.g.:
 cat > .quorum << 'EOF'
 {
-  "gateway_url": "http://localhost:3001",
+  "gateway_url": "<QUORUM_GATEWAY_URL>",
   "project_id": "<project_id>",
   "q_project_id": "q_p1"
 }
@@ -465,7 +483,7 @@ Expected: `pending()` returns DRAFT entries from Phase 8, or "No pending items."
 
 If Quorum is unreachable:
 ```bash
-curl http://localhost:3001/health
+curl "$QUORUM_GATEWAY_URL/health"
 # Expected: { "status": "healthy", "components": { "postgresql": "connected",
 #   "graphiti": "connected", "falkordb": "connected", "s3": "connected" } }
 ```

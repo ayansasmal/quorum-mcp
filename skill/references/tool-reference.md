@@ -347,8 +347,9 @@ is stored in-memory. The browser shows "Quorum authenticated" and the flow retur
 **Trigger:** Auth runs automatically on first tool use. Call explicitly only to
 switch projects or after a `jwt_expired` / `401` response.
 
-**Always required.** `QUORUM_GATEWAY_URL` is always registered (defaults to
-`http://localhost:3001`). The MCP never connects to Graphiti directly — all
+**Always required.** The gateway base URL comes from `QUORUM_GATEWAY_URL` (set in
+your MCP client config to your team's Quorum instance; ask the human if unset —
+do not assume a default). The MCP never connects to Graphiti directly — all
 operations route through the gateway. Identity for the audit trail resolves from
 the JWT `sub` claim (GitHub username); override with `QUORUM_AUTHOR` in CI.
 

@@ -100,8 +100,10 @@ authenticate({ project_id: "other-project-id" })
 ## Gateway-only architecture
 
 The MCP server **always** routes through the Quorum Gateway — there is no
-"direct mode". `QUORUM_GATEWAY_URL` defaults to `http://localhost:3001` and is
-registered automatically during `npm install -g @as-quorum/mcp`.
+"direct mode". The gateway base URL is read from the `QUORUM_GATEWAY_URL`
+environment variable, set in your MCP client config to your team's Quorum
+instance. If it is not set, ask the human for the gateway URL — installations
+differ per team; do not assume a default.
 
 All Graphiti operations (`remember`, `recall`, `search`, `reflect`, `history`,
 `forget`) flow through the gateway's `/graphiti/*` proxy, which:
@@ -131,7 +133,7 @@ export QUORUM_AUTHOR=your-github-username   # identity for audit trail
 |--------|-------|-----|
 | `auth_timeout` | Browser tab not completed within 5 min | Run the tool again to restart flow |
 | `project_mismatch` | Your GitHub username is not in the target project's config | Ask architect to add you to project config |
-| `oauth_not_available` | Gateway OAuth endpoint not responding | Check `curl http://localhost:3001/health` |
+| `oauth_not_available` | Gateway OAuth endpoint not responding | Check `curl "$QUORUM_GATEWAY_URL/health"` |
 | `registration_failed` | Dynamic client registration rejected | Check gateway logs |
 | `token_exchange_failed` | Code/verifier exchange failed | Restart flow; check gateway logs if persists |
 | `state_mismatch` | CSRF check failed | Restart the MCP server (`claude mcp restart quorum`), then retry |
