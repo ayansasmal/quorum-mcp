@@ -122,6 +122,8 @@ These limits are enforced at the Zod layer (MCP) and the gateway validation laye
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `QUORUM_GATEWAY_URL` | *(required — no default)* | URL of the Quorum gateway. Set in your shell or via `claude mcp add -e`. |
+| `QUORUM_DASHBOARD_URL` | *(optional)* | Dashboard origin used for human-facing review and deviation links. |
+| `QUORUM_MCP_PORT` | `50000` | Loopback-only HTTP health endpoint port. Port conflicts are non-fatal because MCP communication uses stdio. |
 | `QUORUM_AUTHOR` | git email | Identity override — useful in CI contexts |
 
 > **Authentication:** auth is automatic — every tool checks for a valid JWT and triggers the PKCE browser flow if missing. You do not need to call `authenticate()` manually. The JWT is stored in-memory only and cleared on MCP restart.
@@ -207,6 +209,8 @@ npm test -- --coverage  # coverage report (lines 86%, branches 79%, functions 84
 ```
 
 > **Important:** the MCP server runs from `dist/server.js` (esbuild bundle). Source edits require `npm run build:all` before changes take effect in Claude Code.
+>
+> **Health endpoint:** each MCP process attempts to expose `http://127.0.0.1:50000/health`. Set `QUORUM_MCP_PORT` to override it. If another process already owns the port, Quorum logs a warning and keeps the stdio MCP transport available.
 
 ---
 

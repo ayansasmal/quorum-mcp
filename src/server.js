@@ -413,10 +413,27 @@ async function startup() {
 
 // ── Health HTTP server ─────────────────────────────────────────────────────────
 
-function startHealthServer() {
-  const port = parseInt(process.env.QUORUM_PORT ?? '8000', 10);
-
-  const httpServer = createHttpServer(async (req, res) => {
+/**
+ * Start the optional local HTTP health endpoint.
+ *
+ * Listener failures are non-fatal because MCP clients communicate over stdio.
+ * Multiple MCP processes may run concurrently, so a second process must remain
+ * usable even when another process already owns the configured health port.
+ *
+ * @param {object} [opts]
+ * @param {number} [opts.port]
+ * @param {string} [opts.host]
+ * @param {typeof createHttpServer} [opts.createServer]
+ * @param {(message: string) => void} [opts.warn]
+ * @returns {import('node:http').Server}
+ */
+export function startHealthServer({
+  port = parseInt(process.env.QUORUM_MCP_PORT ?? '50000', 10),
+  host = '127.0.0.1',
+  createServer = createHttpServer,
+  warn = console.error,
+} = {}) {
+  const httpServer = createServer(async (req, res) => {
     if (req.url !== '/health' && req.url !== '/') {
       res.writeHead(404);
       res.end('Not found');
@@ -445,11 +462,19 @@ function startHealthServer() {
     );
   });
 
-  httpServer.listen(port, () => {
+  httpServer.on('error', (err) => {
+    warn(
+      `[Quorum] WARNING: Health endpoint unavailable on ${host}:${port} (${err.code ?? 'UNKNOWN'}) — MCP stdio remains available`,
+    )
+  })
+
+  httpServer.listen(port, host, () => {
     console.error(
-      `[Quorum] ✓ Health endpoint: http://localhost:${port}/health`,
+      `[Quorum] ✓ Health endpoint: http://${host}:${port}/health`,
     );
   });
+
+  return httpServer
 }
 
 // ── Graceful shutdown ──────────────────────────────────────────────────────────

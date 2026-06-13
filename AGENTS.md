@@ -26,7 +26,7 @@ Always communicates with a Quorum gateway over HTTP. **Never connects to Postgre
 
 ```
 src/
-  server.js               — Entry point: startup, tool registration, health endpoint
+  server.js               — Entry point: startup, tool registration, non-fatal loopback health endpoint (`:50000`)
   quorum-file.js          — .quorum project file auto-discovery (sets env vars)
   tools/                  — One file per MCP tool
   governance/             — conflict.js · authority.js · confidence.js · provenance.js
@@ -87,6 +87,8 @@ QUORUM_GATEWAY_URL=http://localhost:3001 npm run test:integration   # 6 files, 5
 **Identity:** Resolved once per session (from JWT in gateway mode). Never accepted as tool input — server-side only.
 
 **`createMcpServer()` export:** `src/server.js` exports `createMcpServer()` (creates fresh `McpServer` + calls `registerTools(s)`) and `registerTools(targetServer = server)` (parameterised — defaults to module-level singleton). These are used by integration tests; `startup()` continues to use the singleton unchanged. `resolveCtx(mcpServer)` is also parameterised — integration tests hit env fallback (path 3) because InMemoryTransport client doesn't serve `listRoots`.
+
+**Runtime endpoints:** `QUORUM_GATEWAY_URL` is required for gateway calls; `QUORUM_DASHBOARD_URL` is optional and supplies human-facing deep links; `QUORUM_MCP_PORT` optionally overrides the loopback health endpoint's default port `50000`. `startHealthServer()` treats listener failures such as `EADDRINUSE` as warnings because Claude can run multiple stdio MCP processes concurrently.
 
 **Cold-start onboarding:** `authenticate` accepts empty input and `config_upload` is exempt from the no-project-context gate. Verify this through an MCP `Client` + `InMemoryTransport`, not by calling handlers directly.
 
