@@ -57,6 +57,7 @@ tests/integration/        — MCP integration tests (require running gateway); e
 docs/MCP-TEST-PLAN.md     — Risk-weighted test plan for integration suite (OwnScore 655, 6 journeys)
 docs/journey-story-04-06-2026-mcp.md — Journey narratives for J-MCP-01 through J-MCP-06
 docs/superpowers/specs/2026-06-13-safe-hook-installation-design.md — Approved ownership and atomic-repair rules for Claude settings hooks
+docs/superpowers/plans/2026-06-13-safe-hook-installation.md — TDD implementation plan for safe hook inspection, repair, and reporting
 ```
 
 ---
