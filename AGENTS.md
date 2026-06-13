@@ -94,6 +94,8 @@ QUORUM_GATEWAY_URL=http://localhost:3001 npm run test:integration   # 6 files, 5
 
 **Hook installation safety:** `inspectHooks()` validates bundled scripts and Claude settings before any mutation. `installHooks()` repairs only the exact managed IDs in `QUORUM_HOOKS`, preserves unrelated and unknown legacy Quorum hooks, copies only missing/stale scripts, fixes executable mode, and leaves a correct installation untouched. Settings repair writes a sibling temporary file, backs up the previous file to `settings.json.bak`, then atomically renames. Malformed JSON, non-object roots/hooks, or non-array managed events abort before script or settings changes.
 
+**Hook install reporting:** `formatHookInstallReport()` is the shared output contract for `cli.js` and `src/install/postinstall.js`. Callers must render its returned lines rather than inferring success from `installHooks()` so no-op, repaired scripts, repaired settings IDs, and backup paths stay consistent.
+
 **Cold-start onboarding:** `authenticate` accepts empty input and `config_upload` is exempt from the no-project-context gate. Verify this through an MCP `Client` + `InMemoryTransport`, not by calling handlers directly.
 
 **v0.4 Wave A (complete):** Constitutional + DB Foundation — `enforceGlobalWriteAuthority` (lifts GAP-27 soft-return to constitutional throw; config-driven via `getConfig()?.is_global`), `enforceDeviationActionAuthority`, `enforceValidDeferDeadline`; `DeviationStatus`, `DeviationActionType`, `VALID_DEFER_DAYS` in `src/graph/schema.js`; `QuorumConfigSchema` extended with `hierarchy`, `is_global`, `global_scope`, `is_public`, `globals`; executive roles (`director`, `vp_engineering`, `group_executive`) in `src/governance/authority.js`.

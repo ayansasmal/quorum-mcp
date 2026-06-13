@@ -383,3 +383,28 @@ export function installHooks({ hooksDir, settingsPath, scriptsSrc }) {
     backupPath,
   }
 }
+
+/**
+ * Format a hook installation report for CLI output.
+ *
+ * @param {{changed: boolean, repairedScripts: string[], repairedEntries: string[], backupPath: string|null}} report
+ * @returns {string[]}
+ */
+export function formatHookInstallReport(report) {
+  if (!report.changed) {
+    return ['✓ Hooks already installed and correctly wired']
+  }
+
+  /** @type {string[]} */
+  const lines = []
+  if (report.repairedScripts.length > 0) {
+    lines.push(`✓ Hook scripts repaired: ${report.repairedScripts.join(', ')}`)
+  }
+  if (report.repairedEntries.length > 0) {
+    lines.push(`✓ Hook settings repaired: ${report.repairedEntries.join(', ')}`)
+  }
+  if (report.backupPath) {
+    lines.push(`✓ Previous settings backed up → ${report.backupPath}`)
+  }
+  return lines
+}

@@ -18,7 +18,7 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { homedir } from 'node:os'
 import { spawnSync } from 'node:child_process'
-import { installHooks } from './hooks.js'
+import { formatHookInstallReport, installHooks } from './hooks.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 // When bundled: __dirname = <pkg>/dist/  → pkgRoot = <pkg>/
@@ -96,9 +96,10 @@ async function main() {
 
   // 2. Install hooks + settings.json hook wiring
   try {
-    installHooks({ hooksDir, settingsPath, scriptsSrc })
-    console.log(`[quorum] ✓ Hooks installed → ${hooksDir}`)
-    console.log(`[quorum] ✓ Hook wiring merged → ${settingsPath}`)
+    const report = installHooks({ hooksDir, settingsPath, scriptsSrc })
+    for (const line of formatHookInstallReport(report)) {
+      console.log(`[quorum] ${line}`)
+    }
   } catch (err) {
     console.warn(`[quorum] ✗ Hook install skipped: ${err.message}`)
     allOk = false

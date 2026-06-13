@@ -22,7 +22,7 @@ import { fileURLToPath } from 'node:url'
 import { createInterface } from 'node:readline'
 import { spawnSync } from 'node:child_process'
 import { homedir } from 'node:os'
-import { installHooks } from './src/install/hooks.js'
+import { formatHookInstallReport, installHooks } from './src/install/hooks.js'
 import { GatewayClient, setGatewayToken } from './src/gateway/client.js'
 import { verifyChain } from './src/audit/chain.js'
 import { handler as historyHandler } from './src/tools/history.js'
@@ -131,9 +131,10 @@ program
       const settingsPath = join(homedir(), '.claude', 'settings.json')
       const scriptsSrc   = join(pkgRoot, 'hooks')
       try {
-        installHooks({ hooksDir, settingsPath, scriptsSrc })
-        console.log(`✓ Hooks installed → ${hooksDir}`)
-        console.log(`✓ Hook wiring merged → ${settingsPath}`)
+        const report = installHooks({ hooksDir, settingsPath, scriptsSrc })
+        for (const line of formatHookInstallReport(report)) {
+          console.log(line)
+        }
       } catch (err) {
         console.error(`✗ Hook install failed: ${err.message}`)
         process.exit(1)
