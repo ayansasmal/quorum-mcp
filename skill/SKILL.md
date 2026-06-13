@@ -526,6 +526,10 @@ returns it in the `next_step` field of the Phase 4 response.
 
 Follow the full 10-phase protocol: [`references/onboarding.md`](references/onboarding.md).
 
+Cold-start onboarding requires no pre-existing membership or `.quorum` file:
+`authenticate({})` accepts an empty input, and `config_upload` is explicitly exempt
+from the no-project-context gate so it can create the caller's first project.
+
 **Phase overview:**
 1. Check for existing setup (`.quorum` file) — hard-stop if already onboarded
 2. Gather team info — project ID (**hyphens only, no underscores**, e.g. `platform-team`), members, domains, gateway URL, org hierarchy (level/node_id/parent/display_name/criticality), global catalog links

@@ -232,6 +232,11 @@ QUORUM_GATEWAY_URL=http://localhost:3001 npm run test:integration
 | 7 | nonexistent tool name → MCP error (no crash) | ❌ | exception or `isError` |
 | 8 | extra unknown fields → stripped, no crash | ✅ | content[0].type === 'text' |
 
+**Cold-start supplement:** `tests/server/self-serve-onboarding.test.js` uses a real
+MCP `Client` + `InMemoryTransport` pair with a stub gateway. It verifies that
+`authenticate` has no required `project_id` and that `config_upload` succeeds
+without project context or an `X-Quorum-Project` header.
+
 ---
 
 ## Infrastructure
@@ -243,6 +248,7 @@ QUORUM_GATEWAY_URL=http://localhost:3001 npm run test:integration
 | `tests/integration/helpers/tokens.js` | Re-exports JWT factories from `quorum/tests/e2e/helpers/jwt.js` |
 | `tests/integration/helpers/gateway.js` | HTTP seed helpers (activeEntry, draftEntry, getEntry, uid) |
 | `tests/integration/helpers/mcp-client.js` | `createMcpClient()` + `callTool()` — InMemoryTransport factory |
+| `tests/server/self-serve-onboarding.test.js` | Self-contained MCP-client protocol test for projectless authenticate/config_upload bootstrap |
 | `vitest.config.integration.js` | Vitest config: `testTimeout: 30_000`, no coverage |
 | `src/server.js` | Modified: `createMcpServer()` export, `registerTools(targetServer)` |
 

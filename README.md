@@ -125,6 +125,8 @@ These limits are enforced at the Zod layer (MCP) and the gateway validation laye
 | `QUORUM_AUTHOR` | git email | Identity override — useful in CI contexts |
 
 > **Authentication:** auth is automatic — every tool checks for a valid JWT and triggers the PKCE browser flow if missing. You do not need to call `authenticate()` manually. The JWT is stored in-memory only and cleared on MCP restart.
+>
+> **Cold start:** `authenticate` does not require a `project_id`. A GitHub-authenticated user with no existing memberships can obtain a JWT and call `config_upload` before a `.quorum` file exists; project context begins only after the first config is uploaded.
 
 ---
 

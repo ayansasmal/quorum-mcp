@@ -88,6 +88,8 @@ QUORUM_GATEWAY_URL=http://localhost:3001 npm run test:integration   # 6 files, 5
 
 **`createMcpServer()` export:** `src/server.js` exports `createMcpServer()` (creates fresh `McpServer` + calls `registerTools(s)`) and `registerTools(targetServer = server)` (parameterised — defaults to module-level singleton). These are used by integration tests; `startup()` continues to use the singleton unchanged. `resolveCtx(mcpServer)` is also parameterised — integration tests hit env fallback (path 3) because InMemoryTransport client doesn't serve `listRoots`.
 
+**Cold-start onboarding:** `authenticate` accepts empty input and `config_upload` is exempt from the no-project-context gate. Verify this through an MCP `Client` + `InMemoryTransport`, not by calling handlers directly.
+
 **v0.4 Wave A (complete):** Constitutional + DB Foundation — `enforceGlobalWriteAuthority` (lifts GAP-27 soft-return to constitutional throw; config-driven via `getConfig()?.is_global`), `enforceDeviationActionAuthority`, `enforceValidDeferDeadline`; `DeviationStatus`, `DeviationActionType`, `VALID_DEFER_DAYS` in `src/graph/schema.js`; `QuorumConfigSchema` extended with `hierarchy`, `is_global`, `global_scope`, `is_public`, `globals`; executive roles (`director`, `vp_engineering`, `group_executive`) in `src/governance/authority.js`.
 
 **v0.4 Wave B (complete):** Federation — Cross-project reads
