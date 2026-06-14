@@ -118,7 +118,7 @@ async function loadFromDB(pg) {
  */
 function buildEnvFallback() {
   console.error('[Quorum:config] WARNING: No config source found — using env var defaults. No member registry.')
-  return QuorumConfigSchema.parse({
+  const shape = {
     project: process.env.QUORUM_PROJECT_ID ?? 'default',
     group_id: process.env.QUORUM_GROUP_ID ?? 'default',
     members: [],
@@ -128,7 +128,16 @@ function buildEnvFallback() {
       conflict_threshold: parseFloat(process.env.QUORUM_CONFLICT_THRESHOLD ?? '0.85'),
       authority_threshold: parseFloat(process.env.QUORUM_AUTHORITY_THRESHOLD ?? '0.20'),
     },
-  })
+  }
+  try {
+    return QuorumConfigSchema.parse(shape)
+  } catch (err) {
+    // Infallible last resort: a parse failure here must never leave `_config`
+    // null (that surfaces as "Config not loaded" in every getConfig() caller).
+    // Return the unparsed shape — it already matches the schema's required keys.
+    console.error(`[Quorum:config] Env fallback failed schema parse — using raw default shape: ${err.message}`)
+    return /** @type {import('./schema.js').QuorumConfig} */ (shape)
+  }
 }
 
 /**
@@ -197,6 +206,7 @@ export async function loadConfig(pg = null) {
 
   // Start polling for live updates (S3 only — not for local file or env fallback)
   if (bucket && pollInterval > 0 && !localPath) {
+    if (_pollTimer) clearInterval(_pollTimer) // guard against timer leak if loadConfig() is re-invoked (e.g. lazy load)
     _pollTimer = setInterval(() => pollConfig(pg, bucket, projectId), pollInterval * 1000)
     _pollTimer.unref() // don't keep the process alive just for polling
     console.error(`[Quorum:config] Polling S3 config every ${pollInterval}s`)
@@ -230,6 +240,25 @@ async function pollConfig(pg, bucket, projectId) {
 export function getConfig() {
   if (!_config) throw new Error('[Quorum:config] Config not loaded — call loadConfig() at startup')
   return _config
+}
+
+/**
+ * Get the currently loaded config, or `null` if it has not loaded yet.
+ * Non-throwing counterpart to {@link getConfig} — use at call sites that can
+ * tolerate a missing config and degrade (e.g. write-path flag reads) rather
+ * than surfacing "Config not loaded" as a tool failure.
+ * @returns {import('./schema.js').QuorumConfig | null}
+ */
+export function getConfigSafe() {
+  return _config
+}
+
+/**
+ * True once {@link loadConfig} has populated the module cache.
+ * @returns {boolean}
+ */
+export function isConfigLoaded() {
+  return _config !== null
 }
 
 /**

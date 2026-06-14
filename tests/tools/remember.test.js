@@ -23,12 +23,19 @@ import { ConstitutionalViolation } from '../../src/governance/constitutional.js'
 
 // ── Mocks (hoisted — must be at top level in ESM) ─────────────────────────────
 
-vi.mock('../../src/config/loader.js', () => ({
-  loadConfig:       async () => ({ project: 'test', members: [], group_id: 'test-project' }),
-  stopConfigPoller: () => {},
-  // Default: non-global project. Override per-test via vi.mocked(getConfig).mockReturnValue(...)
-  getConfig: vi.fn(() => ({ project: 'test', members: [], roles: {}, domains: {}, group_id: 'test-project', is_global: false })),
-}))
+vi.mock('../../src/config/loader.js', () => {
+  // Faithful to real loader.js: getConfig() THROWS when unloaded; getConfigSafe()
+  // returns null instead. remember() reads config via getConfigSafe — override
+  // it (not getConfig) to drive is_global per-test.
+  const defaultCfg = { project: 'test', members: [], roles: {}, domains: {}, group_id: 'test-project', is_global: false }
+  return {
+    loadConfig:       vi.fn(async () => ({ project: 'test', members: [], group_id: 'test-project' })),
+    stopConfigPoller: () => {},
+    getConfig:        vi.fn(() => defaultCfg),
+    getConfigSafe:    vi.fn(() => defaultCfg),
+    isConfigLoaded:   vi.fn(() => true),
+  }
+})
 
 vi.mock('../../src/graph/client.js', () => ({
   addEpisode: vi.fn(),
@@ -512,8 +519,8 @@ describe('remember — global catalog write authority (v0.4)', () => {
   afterEach(() => vi.clearAllMocks())
 
   it('throws GLOBAL_WRITE_AUTHORITY when engineer writes to a global catalog', async () => {
-    const { getConfig } = await import('../../src/config/loader.js')
-    vi.mocked(getConfig).mockReturnValue({
+    const { getConfigSafe } = await import('../../src/config/loader.js')
+    vi.mocked(getConfigSafe).mockReturnValue({
       project: 'security-standards', members: [], roles: {}, domains: {},
       group_id: 'security-standards', is_global: true,
     })
@@ -538,12 +545,12 @@ describe('remember — global catalog write authority (v0.4)', () => {
   it('allows architect-tier role to write to a global catalog', async () => {
     const { getCurrentVersion, insertVersion } = await import('../../src/graph/queries.js')
     const { addEpisode } = await import('../../src/graph/client.js')
-    const { getConfig } = await import('../../src/config/loader.js')
+    const { getConfigSafe } = await import('../../src/config/loader.js')
 
     vi.mocked(getCurrentVersion).mockResolvedValue(null)
     vi.mocked(insertVersion).mockResolvedValue({ id: 1, version: 1 })
     vi.mocked(addEpisode).mockResolvedValue({ episode_id: 'ep_global' })
-    vi.mocked(getConfig).mockReturnValue({
+    vi.mocked(getConfigSafe).mockReturnValue({
       project: 'security-standards', members: [], roles: {}, domains: {},
       group_id: 'security-standards', is_global: true,
     })
@@ -561,5 +568,60 @@ describe('remember — global catalog write authority (v0.4)', () => {
 
     // Architect writes to global catalog land as DRAFT (pending PA approval)
     expect(result.knowledge_status).toBe('DRAFT')
+  })
+})
+
+// ── Regression: unloaded config must not crash remember() ─────────────────────
+// A server reconnect or hung startup probe can leave startup()'s loadConfig()
+// incomplete, so the module cache is null and getConfig() throws "Config not
+// loaded". remember() previously surfaced that as a tool failure (it read
+// getConfig() unguarded) while pending()/recall()/search() degraded. These tests
+// lock in: (1) remember degrades via getConfigSafe() instead of throwing, and
+// (2) it lazy-loads config when startup never finished.
+describe('remember — regression: resilient to unloaded config', () => {
+  beforeEach(async () => {
+    const { getCurrentVersion, getNextVersionNumber, insertVersion } = await import('../../src/graph/queries.js')
+    const { addEpisode } = await import('../../src/graph/client.js')
+    vi.mocked(getCurrentVersion).mockResolvedValue(null)
+    vi.mocked(getNextVersionNumber).mockResolvedValue(1)
+    vi.mocked(insertVersion).mockResolvedValue({ id: 1, version: 1, status: 'ACTIVE' })
+    vi.mocked(addEpisode).mockResolvedValue({ episode_id: 'ep_001' })
+  })
+
+  afterEach(() => vi.clearAllMocks())
+
+  it('does not throw "Config not loaded" when config is unavailable — degrades is_global to false', async () => {
+    const { getConfig, getConfigSafe, isConfigLoaded } = await import('../../src/config/loader.js')
+    // Reproduce the live failure mode faithfully: the real getConfig() THROWS when
+    // unloaded (the bug — remember read it unguarded), while getConfigSafe() returns
+    // null. isConfigLoaded true skips the lazy load so we isolate the read path.
+    // If remember regresses to getConfig(), this test throws and fails.
+    vi.mocked(isConfigLoaded).mockReturnValue(true)
+    vi.mocked(getConfig).mockImplementation(() => { throw new Error('[Quorum:config] Config not loaded — call loadConfig() at startup') })
+    vi.mocked(getConfigSafe).mockReturnValue(null)
+
+    const { handler } = await import('../../src/tools/remember.js')
+
+    // PA write to a project we cannot classify as global ⟹ treated as non-global ⟹ ACTIVE, no throw.
+    const result = await handler(mockPg, {
+      topic: 'auth', key: 'token-strategy', content: 'Use JWT for all services', confidence: 0.85,
+    }, humanIdentity, testCtx)
+
+    expect(result.status).toBe('stored')
+    expect(result.knowledge_status).toBe('ACTIVE')
+  })
+
+  it('lazy-loads config when startup left it unloaded (isConfigLoaded false → loadConfig called)', async () => {
+    const { isConfigLoaded, loadConfig } = await import('../../src/config/loader.js')
+    vi.mocked(isConfigLoaded).mockReturnValue(false) // startup never finished loadConfig
+
+    const { handler } = await import('../../src/tools/remember.js')
+
+    await handler(mockPg, {
+      topic: 'auth', key: 'token-strategy', content: 'Use JWT for all services', confidence: 0.85,
+    }, humanIdentity, testCtx)
+
+    expect(loadConfig).toHaveBeenCalledOnce()
+    expect(loadConfig).toHaveBeenCalledWith(mockPg) // lazy load threads the pg pool for DB-snapshot fallback
   })
 })

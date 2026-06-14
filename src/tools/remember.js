@@ -35,15 +35,18 @@ import { initialConfidence } from '../governance/confidence.js'
 import { resolveAuthorConfidence } from '../governance/authority.js'
 import { TriggeredBy, KnowledgeStatus } from '../graph/schema.js'
 import { addEpisode, addSupersedingEpisode } from '../graph/client.js'
-import { getConfig } from '../config/loader.js'
+import { getConfigSafe, loadConfig, isConfigLoaded } from '../config/loader.js'
 import {
   getCurrentVersion, getNextVersionNumber, insertVersion, transitionVersionStatus,
   countPendingForKey, insertPendingDecision, getPendingDecisionById, resolvePendingDecision,
 } from '../graph/queries.js'
 
 // GLOBAL_PROJECT_ID constant removed in v0.4 Wave A.
-// Global catalog detection now uses getConfig()?.is_global === true so that ANY
+// Global catalog detection now uses getConfigSafe()?.is_global === true so that ANY
 // project can be elevated to a global catalog, not just the hardcoded 'global' id.
+// getConfigSafe() (not getConfig()) is used so an unloaded config degrades is_global
+// to false rather than throwing "Config not loaded" — the authoritative global-write
+// guard is the gateway-side enforceGlobalWriteAuthority(), this is defence-in-depth.
 // Write authority is enforced by enforceGlobalWriteAuthority() (constitutional layer).
 
 export const schema = z.object({
@@ -115,11 +118,18 @@ export async function handler(pg, input, identity, ctx) {
   const projectId = ctx?.projectId
   if (!projectId) throw new Error('remember: ctx.projectId is required — ensure a .quorum file exists in this workspace')
 
+  // Lazy-ensure config is loaded before any config-dependent enforcement. If a
+  // server reconnect or a hung startup probe left startup()'s loadConfig()
+  // incomplete, the module cache is null and every getConfig() throws
+  // "Config not loaded". Load it on demand (idempotent) so write enforcement
+  // reads a real config instead of failing the tool call.
+  if (!isConfigLoaded()) await loadConfig(pg)
+
   // ── GAP-27 (lifted): Global catalog write authority ─────────────────────────
   // Moved from application-level soft-return to constitutional enforcement.
   // Any project with is_global: true is a global catalog; architect+ can write.
   // Throws ConstitutionalViolation('GLOBAL_WRITE_AUTHORITY') on violation.
-  const isGlobalProject = getConfig()?.is_global === true
+  const isGlobalProject = getConfigSafe()?.is_global === true
   enforceGlobalWriteAuthority(identity, projectId, isGlobalProject)
 
   // ── Resolve a pending conflict ──────────────────────────────────────────────
@@ -144,7 +154,7 @@ export async function handler(pg, input, identity, ctx) {
       if (existing) {
         enforceReasonRequired(input.reason, 'remember (supersede)')
 
-        const globals = getConfig()?.globals ?? []
+        const globals = getConfigSafe()?.globals ?? []
         const conflictResult = await detectConflict(input.content, input.topic, input.key, domain, pg, projectId, globals)
 
         // GAP-03: Graphiti was unavailable — store as PENDING_CONFLICT_CHECK for deferred re-check
@@ -249,7 +259,7 @@ export async function handler(pg, input, identity, ctx) {
 async function supersede(pg, input, existing, author, confidence, tags, triggeredBy, authorRole, projectId, ctx) {
   if (!projectId) throw new Error('supersede: projectId is required')
   // Use config flag, not a hardcoded project id, so any project can be a global catalog.
-  const isGlobal = getConfig()?.is_global === true
+  const isGlobal = getConfigSafe()?.is_global === true
   const nextVersion = await getNextVersionNumber(pg, input.topic, input.key, projectId)
 
   const graphitiResult = await addSupersedingEpisode(input.content, existing.graphiti_episode_id, {
@@ -349,7 +359,7 @@ async function supersede(pg, input, existing, author, confidence, tags, triggere
 async function storeFirst(pg, input, author, confidence, tags, triggeredBy, authorRole, projectId, ctx) {
   if (!projectId) throw new Error('storeFirst: projectId is required')
   // Use config flag, not a hardcoded project id, so any project can be a global catalog.
-  const isGlobal = getConfig()?.is_global === true
+  const isGlobal = getConfigSafe()?.is_global === true
 
   const graphitiResult = await addEpisode(input.content, {
     key: `${input.topic}:${input.key}`,
@@ -671,7 +681,7 @@ async function closeConflict(pg, conflictId, resolution, note, resolvedBy, split
  */
 async function fireWebhookAsync({ conflictId, input, conflictResult, author }) {
   try {
-    const config = getConfig()
+    const config = getConfigSafe()
     const url = config?.notifications?.webhook_url
     if (!url) return
 

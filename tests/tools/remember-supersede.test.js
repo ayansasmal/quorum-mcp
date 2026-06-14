@@ -15,12 +15,19 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 // ── Mocks (hoisted) ───────────────────────────────────────────────────────────
 
-vi.mock('../../src/config/loader.js', () => ({
-  loadConfig:       async () => ({ project: 'test', members: [], group_id: 'test-project' }),
-  stopConfigPoller: () => {},
-  // Default: non-global project. Override per-test via vi.mocked(getConfig).mockReturnValue(...)
-  getConfig: vi.fn(() => ({ project: 'test', members: [], roles: {}, domains: {}, group_id: 'test-project', is_global: false })),
-}))
+vi.mock('../../src/config/loader.js', () => {
+  // getConfig and getConfigSafe share one fn so per-test
+  // vi.mocked(getConfig).mockReturnValue(...) overrides flow through both.
+  const cfg = vi.fn(() => ({ project: 'test', members: [], roles: {}, domains: {}, group_id: 'test-project', is_global: false }))
+  return {
+    loadConfig:       async () => ({ project: 'test', members: [], group_id: 'test-project' }),
+    stopConfigPoller: () => {},
+    // Default: non-global project. Override per-test via vi.mocked(getConfig).mockReturnValue(...)
+    getConfig: cfg,
+    getConfigSafe: cfg,
+    isConfigLoaded: () => true,
+  }
+})
 
 vi.mock('../../src/graph/client.js', () => ({
   addEpisode: vi.fn().mockResolvedValue({ episode_id: 'ep_new' }),
