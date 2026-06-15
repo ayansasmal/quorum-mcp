@@ -185,6 +185,15 @@ export class GatewayClient {
       headers['X-Quorum-Project'] = projectId
     }
 
+    log.trace('gateway request outbound', {
+      gateway_url: this._gatewayUrl,
+      method,
+      path,
+      headers,
+      project_id: projectId,
+      body: body ?? null,
+    })
+
     const response = await fetch(`${this._gatewayUrl}${path}`, {
       method,
       headers,
@@ -195,14 +204,36 @@ export class GatewayClient {
     if (!response.ok) {
       const errBody = await response.json().catch(() => ({}))
       log.error('gateway request failed', { method, path, status: response.status, body: errBody })
+      log.trace('gateway response error', {
+        method,
+        path,
+        status: response.status,
+        body: errBody,
+      })
       const err = new Error(`Gateway ${method} ${path} failed (${response.status}): ${errBody.message ?? response.statusText}`)
       err.status = response.status
       err.body   = errBody
       throw err
     }
 
-    if (response.status === 204) return null
-    return response.json()
+    if (response.status === 204) {
+      log.trace('gateway response inbound', {
+        method,
+        path,
+        status: response.status,
+        body: null,
+      })
+      return null
+    }
+
+    const responseBody = await response.json()
+    log.trace('gateway response inbound', {
+      method,
+      path,
+      status: response.status,
+      body: responseBody,
+    })
+    return responseBody
   }
 
   /**

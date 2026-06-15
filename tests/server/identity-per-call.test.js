@@ -94,8 +94,9 @@ vi.mock('../../src/quorum-file.js', () => ({
 vi.mock('../../src/logger.js', () => ({
   log: {
     startCall: () => {}, endCall: () => {},
-    info: () => {}, warn: () => {}, error: () => {}, debug: () => {},
+    info: () => {}, warn: () => {}, error: () => {}, debug: () => {}, trace: () => {},
     path: '/tmp/quorum.log',
+    verboseTraceEnabled: false,
   },
 }))
 

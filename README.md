@@ -72,6 +72,12 @@ Set the gateway URL — **required** (there is no default):
 export QUORUM_GATEWAY_URL=https://quorum.your-org.internal
 ```
 
+Enable verbose end-to-end trace logging when debugging:
+
+```bash
+export QUORUM_TRACE_VERBOSE=true
+```
+
 Then connect a project:
 
 ```bash

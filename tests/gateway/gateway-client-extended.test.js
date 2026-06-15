@@ -9,7 +9,7 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 
 vi.mock('../../src/logger.js', () => ({
-  log: { debug: vi.fn(), error: vi.fn(), info: vi.fn() },
+  log: { debug: vi.fn(), error: vi.fn(), info: vi.fn(), trace: vi.fn() },
 }))
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -381,6 +381,41 @@ describe('GatewayClient — _request (HTTP calls)', () => {
     const call = fetch.mock.calls[0]
     expect(call[1].method).toBe('POST')
     expect(JSON.parse(call[1].body)).toEqual({ topic: 'auth', key: 'token' })
+  })
+
+  it('emits trace logs for outbound gateway request payloads and inbound responses', async () => {
+    const { setGatewayToken, GatewayClient } = await import('../../src/gateway/client.js')
+    const { log } = await import('../../src/logger.js')
+    setGatewayToken(freshToken())
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ stored: true, id: 'a1' }),
+    }))
+
+    const client = new GatewayClient('http://localhost:3001')
+    await client._post('/pg/audit', { tool: 'remember', topic: 'auth' }, { projectId: 'q_p1' })
+
+    expect(log.trace).toHaveBeenCalledWith(
+      'gateway request outbound',
+      expect.objectContaining({
+        gateway_url: 'http://localhost:3001',
+        method: 'POST',
+        path: '/pg/audit',
+        project_id: 'q_p1',
+        body: { tool: 'remember', topic: 'auth' },
+      }),
+    )
+    expect(log.trace).toHaveBeenCalledWith(
+      'gateway response inbound',
+      expect.objectContaining({
+        method: 'POST',
+        path: '/pg/audit',
+        status: 200,
+        body: { stored: true, id: 'a1' },
+      }),
+    )
   })
 })
 

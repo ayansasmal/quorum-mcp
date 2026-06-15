@@ -26,6 +26,7 @@
 import { searchNodes, normalizeGroupId } from '../graph/client.js'
 import { calculateAuthority, shouldAutoSupersede } from './authority.js'
 import { getConfig } from '../config/loader.js'
+import { log } from '../logger.js'
 
 const DEFAULT_CONFLICT_THRESHOLD = parseFloat(process.env.QUORUM_CONFLICT_THRESHOLD ?? '0.85')
 
@@ -74,6 +75,10 @@ function getConflictThreshold(domain) {
  */
 async function checkContradiction(existing, incoming, gw) {
   try {
+    log.trace('governance contradiction payload', {
+      existing,
+      incoming,
+    })
     const result = typeof gw.detectConflict === 'function'
       ? await gw.detectConflict(existing, incoming)
       : await gw._post('/governance/detect-conflict', { existing, incoming })
@@ -117,6 +122,13 @@ export async function generateEnrichment(existing, incoming, conflictReason, pos
   }
 
   try {
+    log.trace('governance enrichment payload', {
+      existing,
+      incoming,
+      conflict_reason: conflictReason,
+      possible_split: possibleSplit,
+      split_suggestion: splitSuggestion ?? null,
+    })
     const result = typeof gw.enrichConflict === 'function'
       ? await gw.enrichConflict(existing, incoming, conflictReason, possibleSplit, splitSuggestion)
       : await gw._post('/governance/enrich', {

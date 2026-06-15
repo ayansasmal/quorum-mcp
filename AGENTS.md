@@ -92,6 +92,8 @@ QUORUM_GATEWAY_URL=http://localhost:3001 npm run test:integration   # 6 files, 5
 
 **Runtime endpoints:** `QUORUM_GATEWAY_URL` is required for gateway calls; `QUORUM_DASHBOARD_URL` is optional and supplies human-facing deep links; `QUORUM_MCP_PORT` optionally overrides the loopback health endpoint's default port `50000`. `startHealthServer()` treats listener failures such as `EADDRINUSE` as warnings because Claude can run multiple stdio MCP processes concurrently.
 
+**Verbose tracing:** `QUORUM_TRACE_VERBOSE=true` enables end-to-end raw payload tracing into `~/.quorum/mcp.log` and `~/.quorum/calls/*.log`. This includes MCP tool inputs/results, outbound gateway request/response payloads, and governance payloads derived before `/governance/*` gateway calls. Keep it off by default for published installs; turn it on explicitly in local shells or Claude config when debugging.
+
 **Hook installation safety:** `inspectHooks()` validates bundled scripts and Claude settings before any mutation. `installHooks()` repairs only the exact managed IDs in `QUORUM_HOOKS`, preserves unrelated and unknown legacy Quorum hooks, copies only missing/stale scripts, fixes executable mode, and leaves a correct installation untouched. Settings repair writes a sibling temporary file, backs up the previous file to `settings.json.bak`, then atomically renames. Malformed JSON, non-object roots/hooks, or non-array managed events abort before script or settings changes.
 
 **Hook install reporting:** `formatHookInstallReport()` is the shared output contract for `cli.js` and `src/install/postinstall.js`. Callers must render its returned lines rather than inferring success from `installHooks()` so no-op, repaired scripts, repaired settings IDs, and backup paths stay consistent.

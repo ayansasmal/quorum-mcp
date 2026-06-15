@@ -185,11 +185,19 @@ export function registerTools(targetServer = server) {
     targetServer.registerTool(name, { inputSchema: def.schema }, async input => {
       log.startCall(name)
       try {
+        log.trace('tool call started', {
+          input,
+          verbose_trace_enabled: log.verboseTraceEnabled,
+        })
         // Resolve fresh ctx on every call — stateless, no env mutation.
         // Each Claude Code session has its own MCP server process + stdio pipe,
         // so listRoots() returns this session's directory — safe for parallel sessions.
         log.info(`tool:${name}`, { input })
         const ctx = await resolveCtx(targetServer);
+        log.trace('tool context resolved', {
+          ctx,
+          agent_ctx: getAgentCtx(),
+        })
 
         // Gate 1: no project context — .quorum file missing and no env fallback
         if (!ctx && name !== 'authenticate' && name !== 'config_upload') {
@@ -253,6 +261,10 @@ export function registerTools(targetServer = server) {
         // Graphiti/FalkorDB). The gateway's verify-jwt compares against profile.projects[].group_id
         // which is always the hyphenated form; graphiti.js converts internally before FalkorDB calls.
         if (activePool?.setProjectId) activePool.setProjectId(ctx?.groupId ?? ctx?.projectId ?? null)
+        log.trace('gateway client prepared', {
+          gateway_url: ctx?.gatewayUrl ?? null,
+          project_id: ctx?.groupId ?? ctx?.projectId ?? null,
+        })
 
         // Merge agent context into ctx for write tools
         const agentCtx = getAgentCtx()
@@ -274,8 +286,10 @@ export function registerTools(targetServer = server) {
         } catch {
           identity = await resolveIdentity()
         }
+        log.trace('tool identity resolved', { identity })
 
         const result = await def.handler(activePool, input, identity, ctx);
+        log.trace('tool handler result', { result })
         return {
           content: [
             {
@@ -289,6 +303,10 @@ export function registerTools(targetServer = server) {
         };
       } catch (err) {
         log.error(`tool:${name} failed`, { error: err.message, stack: err.stack })
+        log.trace('tool handler error', {
+          error: err.message,
+          stack: err.stack,
+        })
         return {
           content: [{
             type: 'text',
