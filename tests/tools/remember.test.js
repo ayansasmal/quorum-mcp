@@ -355,6 +355,7 @@ describe('remember — conflict detection', () => {
   it('returns conflict_detected shape with conflict_id when human resolution is required', async () => {
     const { getCurrentVersion } = await import('../../src/graph/queries.js')
     const { detectConflict, resolveConflict } = await import('../../src/governance/conflict.js')
+    const { insertVersion, insertPendingDecision } = await import('../../src/graph/queries.js')
 
     vi.mocked(getCurrentVersion).mockResolvedValue(existingVersion)
     vi.mocked(detectConflict).mockResolvedValue({
@@ -376,6 +377,8 @@ describe('remember — conflict detection', () => {
         split_suggestion: null,
       },
     })
+    vi.mocked(insertVersion).mockResolvedValue({ version_id: 'q_k1_v2', q_key_id: 'q_k1', version: 2, status: 'DRAFT' })
+    vi.mocked(insertPendingDecision).mockResolvedValue('conflict_123')
 
     const { handler } = await import('../../src/tools/remember.js')
 
@@ -388,10 +391,27 @@ describe('remember — conflict detection', () => {
     }, humanIdentity, testCtx)
 
     expect(result.status).toBe('conflict_detected')
-    expect(result.conflict_id).toBeDefined()
     expect(result.conflict_id).toMatch(/^conflict_/)
     expect(result.brief).toBeDefined()
     expect(result.brief.type).toBe('conflict_decision_required')
+    expect(result.knowledge_status).toBe('DRAFT')
+    expect(result.version).toBe(2)
+    expect(vi.mocked(insertVersion)).toHaveBeenCalledWith(
+      mockPg,
+      expect.objectContaining({
+        status: 'DRAFT',
+        supersedes_version: 1,
+        supersedes_reason: 'High concurrency batch jobs need more connections',
+      }),
+    )
+    expect(vi.mocked(insertPendingDecision)).toHaveBeenCalledWith(
+      mockPg,
+      expect.objectContaining({
+        conflict_id: expect.stringMatching(/^conflict_/),
+        incoming_version_id: 'q_k1_v2',
+        incoming_content: 'Use pool size 50 for batch processing',
+      }),
+    )
   })
 
   it('conflict_detected result includes possible_split signal', async () => {

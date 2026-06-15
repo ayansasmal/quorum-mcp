@@ -133,6 +133,8 @@ QUORUM_GATEWAY_URL=http://localhost:3001 npm run test:integration   # 6 files, 5
 
 **Agent identity (v0.3):** `set_agent_context({ agent_id })` is Gate 3 — must be called before any write tool (`remember`, `reflect`, `forget`, `review`). `agent_id` is validated as `^[a-z][a-z0-9-]{0,39}$`. `session_id` is derived server-side from `hash(PID + hrtime.bigint())` → `sess_` + 8 hex chars. `author_type` is always `'agent'` (never caller-supplied) — distinguishes agent MCP writes from human dashboard writes (`author_type: 'human'` on all dashboard create/promote/supersede/deprecate actions). All three fields are written to `knowledge_versions.agent_id`, `.session_id`, `.author_type` via `buildVersionRecord()`.
 
+**Conflict persistence fix (2026-06-15):** when `remember()` hits `detectConflict()` and the resolution is `human_required`, it now stores the incoming knowledge as a real `DRAFT` version before creating the `pending_decisions` row. The pending row carries `incoming_version_id`, and the `conflict_detected` response now includes `knowledge_status: 'DRAFT'` plus the stored version number. This aligns the human-conflict path with the existing `PENDING_CONFLICT_CHECK` durability model: conflicting content is preserved instead of being discarded.
+
 **Skill + Hooks:** Install with `npx @as-quorum/mcp install`. Copies `skill/SKILL.md` to `~/.Codex/skills/quorum/`, copies `hooks/quorum-*.sh` to `~/.Codex/hooks/`, merges hook wiring into `~/.Codex/settings.json`, and runs `Codex mcp add`. Use `--skip-mcp`, `--skip-skill`, or `--skip-hooks` to skip individual steps. Hooks are self-limiting: each script checks `[ -f ".quorum" ] || exit 0` — silent in any project without a `.quorum` sentinel file.
 
 ---

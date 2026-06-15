@@ -626,7 +626,7 @@ describe('insertPendingDecision', () => {
       enrichment: { analysis: 'conflict analysis here' },
     })
     const params = query.mock.calls[0][1]
-    expect(typeof params[8]).toBe('string') // enrichment stringified
+    expect(typeof params[9]).toBe('string') // enrichment stringified
   })
 })
 

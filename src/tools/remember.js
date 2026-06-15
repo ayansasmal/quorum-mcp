@@ -172,6 +172,18 @@ export async function handler(pg, input, identity, ctx) {
 
           if (resolution.action === 'human_required') {
             const conflictId = `conflict_${uuidv4()}`
+            const draftResult = await storeConflictDraft(
+              pg,
+              input,
+              existing,
+              author,
+              confidence,
+              tags,
+              triggeredBy,
+              identity?.role,
+              projectId,
+              ctx,
+            )
 
             // Generate enrichment at conflict creation time — not at review time
             const enrichment = await generateEnrichment(
@@ -204,6 +216,7 @@ export async function handler(pg, input, identity, ctx) {
               active_version_at_creation: existing.version,
               existing_content: existing.content ?? null,
               incoming_content: input.content,
+              incoming_version_id: draftResult.result.version_id,
               conflict_reason: conflictResult.reason,
               enrichment: enrichmentWithMeta,
               more_pending_same_key: morePendingSameKey,
@@ -217,12 +230,14 @@ export async function handler(pg, input, identity, ctx) {
               result: {
                 status: 'conflict_detected',
                 conflict_id: conflictId,
+                knowledge_status: draftResult.result.knowledge_status,
+                version: draftResult.result.version,
                 possible_split: conflictResult.possible_split ?? false,
                 split_suggestion: conflictResult.split_suggestion ?? null,
                 brief: resolution.brief,
-                message: 'Human decision required. Call remember() again with conflict_id + resolution (supersede | coexist_split | coexist_merge | reject | escalate) + mandatory reason.',
+                message: 'Conflict detected. Knowledge stored as DRAFT pending human review. Call remember() again with conflict_id + resolution (supersede | coexist_split | coexist_merge | reject | escalate) + mandatory reason.',
               },
-              versionImpact: buildAuditVersionImpact([], []),
+              versionImpact: draftResult.versionImpact,
             }
           }
           // auto_supersede falls through to the supersession logic below
@@ -483,6 +498,82 @@ async function storePendingConflictCheck(pg, input, author, confidence, tags, tr
     },
     versionImpact: buildAuditVersionImpact(
       [{ version, status: KnowledgeStatus.PENDING_CONFLICT_CHECK, triggered_by: triggeredBy, versionId: inserted?.version_id, qKeyId: inserted?.q_key_id }],
+      [],
+    ),
+  }
+}
+
+/**
+ * Store the incoming conflicting knowledge as a DRAFT so human review can
+ * promote/reject the exact version that triggered the conflict.
+ *
+ * @param {import('pg').Pool} pg
+ * @param {z.infer<typeof schema>} input
+ * @param {Record<string, unknown>} existing
+ * @param {string} author
+ * @param {number} confidence
+ * @param {string[]} tags
+ * @param {string} triggeredBy
+ * @param {string} [authorRole]
+ * @param {string} projectId
+ * @param {{ agentId?: string, sessionId?: string, authorType?: string } | null} [ctx]
+ */
+async function storeConflictDraft(pg, input, existing, author, confidence, tags, triggeredBy, authorRole, projectId, ctx) {
+  const nextVersion = await getNextVersionNumber(pg, input.topic, input.key, projectId)
+  const episode = existing.graphiti_episode_id
+    ? await addSupersedingEpisode(input.content, existing.graphiti_episode_id, {
+      key: `${input.topic}:${input.key}`,
+      source: `quorum:remember:${author}`,
+      entityType: input.entity_type,
+      tags,
+      confidence,
+      reason: input.reason,
+    }, projectId)
+    : await addEpisode(input.content, {
+      key: `${input.topic}:${input.key}`,
+      source: `quorum:remember:${author}`,
+      entityType: input.entity_type,
+      tags,
+      confidence,
+    }, projectId)
+
+  const versionRecord = buildVersionRecord({
+    topic: input.topic,
+    key: input.key,
+    version: nextVersion,
+    content: input.content,
+    author,
+    authorRole: authorRole ?? 'unknown',
+    confidence,
+    tags,
+    triggeredBy,
+    auditEntryId: 'pre_pending',
+    graphitiEpisodeId: episode.episode_id,
+    supersedesVersion: existing.version,
+    supersedesReason: input.reason,
+    status: KnowledgeStatus.DRAFT,
+    projectId,
+    entityType: input.entity_type,
+    agentId:    ctx?.agentId    ?? null,
+    sessionId:  ctx?.sessionId  ?? null,
+    authorType: ctx?.authorType ?? 'agent',
+  })
+
+  const inserted = await insertVersion(pg, { ...versionRecord, tags })
+  const actualStatus = inserted?.status ?? KnowledgeStatus.DRAFT
+
+  return {
+    result: {
+      status: 'stored',
+      topic: input.topic,
+      key: input.key,
+      version: nextVersion,
+      version_id: inserted?.version_id ?? versionRecord.version_id ?? null,
+      knowledge_status: actualStatus,
+      episode_id: episode.episode_id,
+    },
+    versionImpact: buildAuditVersionImpact(
+      [{ version: nextVersion, status: actualStatus, triggered_by: triggeredBy, versionId: inserted?.version_id, qKeyId: inserted?.q_key_id }],
       [],
     ),
   }
