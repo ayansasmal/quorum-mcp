@@ -107,6 +107,14 @@ A product requirement may exist that governs why the feature exists.
 
 ## During Task — Proactive Knowledge Use
 
+### Writing rule — applies to every `remember()` call
+
+**Always call `remember()` one at a time. Wait for each call to return before submitting the next. Never fire multiple `remember()` calls in parallel.**
+
+Parallel writes bypass conflict detection — both calls see no existing version, both write as "first version", and neither compares content against the other. This applies everywhere `remember()` is used: mid-task constraints, post-task reflection entries, conflict resolutions, and supersedes. If any call returns `conflict_detected`, you need the result before deciding what to write next.
+
+---
+
 Do not wait to be asked. When you encounter any of these, act immediately:
 
 ### You are about to make an implementation choice

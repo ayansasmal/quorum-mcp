@@ -39,6 +39,7 @@ import { getConfigSafe, loadConfig, isConfigLoaded } from '../config/loader.js'
 import {
   getCurrentVersion, getNextVersionNumber, insertVersion, transitionVersionStatus,
   countPendingForKey, insertPendingDecision, getPendingDecisionById, resolvePendingDecision,
+  getSpecificVersion,
 } from '../graph/queries.js'
 
 // GLOBAL_PROJECT_ID constant removed in v0.4 Wave A.
@@ -152,8 +153,6 @@ export async function handler(pg, input, identity, ctx) {
 
       // ── Superseding existing knowledge ──────────────────────────────────────
       if (existing) {
-        enforceReasonRequired(input.reason, 'remember (supersede)')
-
         const globals = getConfigSafe()?.globals ?? []
         const conflictResult = await detectConflict(input.content, input.topic, input.key, domain, pg, projectId, globals)
 
@@ -243,11 +242,52 @@ export async function handler(pg, input, identity, ctx) {
           // auto_supersede falls through to the supersession logic below
         }
 
+        // No conflict detected — this is an intentional supersede, reason required
+        enforceReasonRequired(input.reason, 'remember (supersede)')
         return supersede(pg, input, existing, author, confidence, tags, triggeredBy, identity?.role, projectId, ctx)
       }
 
       // ── First version ───────────────────────────────────────────────────────
-      return storeFirst(pg, input, author, confidence, tags, triggeredBy, identity?.role, projectId, ctx)
+      const firstResult = await storeFirst(pg, input, author, confidence, tags, triggeredBy, identity?.role, projectId, ctx)
+
+      // Post-write race detection: if our write landed as version > 1 despite
+      // getCurrentVersion returning null above, a concurrent writer committed
+      // between our check and our insert — neither caller ran conflict detection.
+      // Downgrade to PENDING_CONFLICT_CHECK so a human can compare both writes.
+      if (firstResult.result.version > 1) {
+        const preceding = await getSpecificVersion(pg, input.topic, input.key, firstResult.result.version - 1)
+        if (preceding) {
+          await transitionVersionStatus(pg, input.topic, input.key, firstResult.result.version, KnowledgeStatus.PENDING_CONFLICT_CHECK, null)
+          const conflictId = `conflict_${uuidv4()}`
+          const morePending = await countPendingForKey(pg, input.topic, input.key, projectId)
+          await insertPendingDecision(pg, {
+            conflict_id: conflictId,
+            conflict_topic: input.topic,
+            conflict_key: input.key,
+            active_version_at_creation: preceding.version,
+            existing_content: preceding.content ?? preceding.summary ?? '',
+            incoming_content: input.content,
+            incoming_version_id: null,
+            conflict_reason: 'Concurrent write detected — two versions submitted for the same topic:key without conflict detection',
+            enrichment: null,
+            more_pending_same_key: morePending,
+            project_id: projectId,
+          })
+          console.error(`[Quorum:remember] Concurrent write race: ${input.topic}:${input.key} v${firstResult.result.version} → PENDING_CONFLICT_CHECK`)
+          return {
+            result: {
+              status: 'conflict_detected',
+              conflict_id: conflictId,
+              knowledge_status: KnowledgeStatus.PENDING_CONFLICT_CHECK,
+              version: firstResult.result.version,
+              message: 'Concurrent write detected — another version already exists for this topic:key. Stored as PENDING_CONFLICT_CHECK. Call pending() to review.',
+            },
+            versionImpact: firstResult.versionImpact,
+          }
+        }
+      }
+
+      return firstResult
     },
   )
 
