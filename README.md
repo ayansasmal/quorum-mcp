@@ -218,6 +218,11 @@ tests/
 npm install
 npm run build:all    # compile server + CLI → dist/
 npm run setup        # install skill, hooks, MCP (alias for: quorum install)
+npm test             # run unit tests
+
+# Release automation:
+npm run release:patch   # or release:minor / release:major
+git push --follow-tags  # publishes on v*.*.* tags via GitHub Actions
 npm run dev          # node --watch src/server.js (no build step needed for MCP server)
 npm test             # run all tests (41 files, 645 tests)
 npm test -- --coverage  # coverage report (lines 86%, branches 79%, functions 84%)

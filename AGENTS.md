@@ -139,6 +139,12 @@ QUORUM_GATEWAY_URL=http://localhost:3001 npm run test:integration   # 6 files, 5
 
 **Skill + Hooks:** Install with `npx @as-quorum/mcp install`. Copies `skill/SKILL.md` to `~/.Codex/skills/quorum/`, copies `hooks/quorum-*.sh` to `~/.Codex/hooks/`, merges hook wiring into `~/.Codex/settings.json`, and runs `Codex mcp add`. Use `--skip-mcp`, `--skip-skill`, or `--skip-hooks` to skip individual steps. Hooks are self-limiting: each script checks `[ -f ".quorum" ] || exit 0` — silent in any project without a `.quorum` sentinel file.
 
+**npm release automation (2026-07-01):** `.github/workflows/release.yml` publishes `@as-quorum/mcp` on `v*.*.*`
+tags and supports `workflow_dispatch` dry runs. It follows the current GitHub/npm provenance flow: GitHub-hosted
+runner, `actions/checkout@v6`, `actions/setup-node@v6`, `permissions.id-token: write`, `npm pack --dry-run`, then
+`npm publish --provenance --access public`. `.npmrc` reads `NODE_AUTH_TOKEN`, and the repo Actions secret required is
+`NPM_TOKEN`.
+
 ---
 
 ## Non-Negotiable Rules (enforced by constitutional tests)

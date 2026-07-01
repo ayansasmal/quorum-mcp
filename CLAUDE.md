@@ -72,6 +72,10 @@ npm test             # run all unit tests (41 files, 645 tests) — excludes int
 npm test -- --coverage  # with v8 coverage report (75% threshold: lines, branches, functions)
 npm run test:constitutional  # Layer 1 only (blocking CI gate)
 
+# Release automation:
+npm run release:patch   # or release:minor / release:major
+git push --follow-tags  # triggers .github/workflows/release.yml
+
 # Integration tests — require a running gateway (QUORUM_GATEWAY_URL must be set):
 QUORUM_GATEWAY_URL=http://localhost:3001 npm run test:integration   # 6 files, 54 leaves
 ```
