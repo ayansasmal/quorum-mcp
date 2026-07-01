@@ -1,14 +1,14 @@
 /**
  * Vitest globalSetup — seeds fixture project configs before the MCP integration
- * tests run. Mirrors quorum/tests/e2e/helpers/setup.js (Playwright globalSetup).
+ * tests run. Mirrors quorum/e2e/helpers/setup.js (Playwright globalSetup).
  *
  * Responsibilities:
  *   1. Wait until the gateway is healthy.
  *   2. Upload all fixture .quorum.json configs via POST /config/upload (idempotent).
  *
- * The fixture files live in quorum/tests/e2e/fixtures/. With the qc/ parent
+ * The fixture files live in quorum/e2e/fixtures/. With the qc/ parent
  * mounted at /workspace in Docker, this resolves to:
- *   /workspace/quorum/tests/e2e/fixtures/
+ *   /workspace/quorum/e2e/fixtures/
  *
  * This file is executed by Vitest's globalSetup runner (not inside a worker),
  * so it uses plain Node.js fetch rather than any test-runner globals.
@@ -20,8 +20,8 @@ import { fileURLToPath } from 'node:url'
 import jwt from 'jsonwebtoken'
 
 const __dir    = dirname(fileURLToPath(import.meta.url))
-// Resolves to quorum/tests/e2e/helpers/ — same parent-relative path as tokens.js
-const HELPERS_DIR  = resolve(__dir, '../../../../quorum/tests/e2e/helpers')
+// Resolves to quorum/e2e/helpers/ — same parent-relative path as tokens.js
+const HELPERS_DIR  = resolve(__dir, '../../../../quorum/e2e/helpers')
 const FIXTURES_DIR = resolve(HELPERS_DIR, '../fixtures')
 const PRIV_KEY = readFileSync(resolve(HELPERS_DIR, '../fixtures/test-private-key.pem'))
 

@@ -37,7 +37,7 @@ function jwtSub(token) {
 }
 
 const __dir        = dirname(fileURLToPath(import.meta.url));
-const FIXTURES_DIR = resolve(__dir, '../../../../quorum/tests/e2e/fixtures');
+const FIXTURES_DIR = resolve(__dir, '../../../../quorum/e2e/fixtures');
 
 export const TEST_PROJECT  = 'quorum-test-project';
 export const PEER_PROJECT  = 'quorum-test-peer-project';

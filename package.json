@@ -62,7 +62,7 @@
     "test:constitutional": "vitest run tests/constitutional",
     "test:coverage": "vitest run --coverage",
     "test:integration": "vitest run --config vitest.config.integration.js",
-    "test:integration:docker": "docker compose -f ../quorum/docker-compose.e2e.yml run --rm mcp-test-runner",
+    "test:integration:docker": "docker compose -f ../quorum/e2e/docker-compose.yml run --rm mcp-test-runner",
     "prepublishOnly": "npm run build:all",
     "prepare": "husky || true",
     "release": "commit-and-tag-version",

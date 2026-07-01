@@ -45,7 +45,7 @@ hooks/                    — 5 Codex hook scripts (bundled with npm; installed 
 skill/                    — SKILL.md + references/ (bundled with npm package)
 dist/                     — Compiled output (esbuild, gitignored)
 tests/integration/        — MCP integration tests (require running gateway); excluded from npm test
-  helpers/tokens.js       — JWT factories (re-exports from quorum/tests/e2e/helpers/jwt.js)
+  helpers/tokens.js       — JWT factories (re-exports from quorum/e2e/helpers/jwt.js)
   helpers/gateway.js      — HTTP seed helpers (activeEntry, draftEntry, uid) — uses Node fetch
   helpers/mcp-client.js   — createMcpClient() + callTool() via InMemoryTransport + createMcpServer()
   M-01-*.test.js          — Identity & write lifecycle (OwnScore 200 ⛔)

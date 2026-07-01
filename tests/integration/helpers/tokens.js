@@ -2,7 +2,7 @@
  * Token factory for MCP integration tests.
  *
  * Re-exports the same factory functions used by the gateway E2E suite, pointing
- * at the shared test private key in quorum/tests/e2e/fixtures/. Both repos
+ * at the shared test private key in quorum/e2e/fixtures/. Both repos
  * share the same key so the gateway accepts these tokens in test mode.
  *
  * Role mapping for quorum-test-project (canonical fixtures):
@@ -19,7 +19,7 @@ export {
   architectToken,
   adminToken,
   token,
-} from '../../../../quorum/tests/e2e/helpers/jwt.js';
+} from '../../../../quorum/e2e/helpers/jwt.js';
 
 // Re-export with MCP-test-specific aliases so test files read clearly
-export { peToken } from '../../../../quorum/tests/e2e/helpers/jwt.js';
+export { peToken } from '../../../../quorum/e2e/helpers/jwt.js';

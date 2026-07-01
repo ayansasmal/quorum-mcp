@@ -2,7 +2,7 @@
 
 **Version:** 1.0 | **Date:** 2026-06-04 | **Suite:** `quorum-mcp/tests/integration/`
 
-> MCP gateway layer E2E: the gateway E2E suite (`quorum/tests/e2e/`) tests the HTTP surface directly.
+> MCP gateway layer E2E: the gateway E2E suite (`quorum/e2e/`) tests the HTTP surface directly.
 > This plan covers the MCP layer — the full path from JSON-RPC framing through tool handlers to real gateway HTTP.
 
 ---
@@ -245,7 +245,7 @@ without project context or an `X-Quorum-Project` header.
 
 | File | Purpose |
 |------|---------|
-| `tests/integration/helpers/tokens.js` | Re-exports JWT factories from `quorum/tests/e2e/helpers/jwt.js` |
+| `tests/integration/helpers/tokens.js` | Re-exports JWT factories from `quorum/e2e/helpers/jwt.js` |
 | `tests/integration/helpers/gateway.js` | HTTP seed helpers (activeEntry, draftEntry, getEntry, uid) |
 | `tests/integration/helpers/mcp-client.js` | `createMcpClient()` + `callTool()` — InMemoryTransport factory |
 | `tests/server/self-serve-onboarding.test.js` | Self-contained MCP-client protocol test for projectless authenticate/config_upload bootstrap |
