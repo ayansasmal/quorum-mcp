@@ -262,6 +262,34 @@ export function isConfigLoaded() {
 }
 
 /**
+ * Resolve a project's linked global catalogs, preferring the gateway's
+ * authoritative view over this process's own module-cached config.
+ *
+ * Standard engineer MCP installs (`QUORUM_GATEWAY_URL` only — no
+ * `QUORUM_CONFIG_BUCKET`/AWS creds in the MCP process's own environment)
+ * always fall through {@link loadConfig} to `buildEnvFallback()`, which has
+ * an empty `globals: []`. Reading `getConfig()?.globals` directly in that
+ * mode silently scopes every cross-catalog read/write to the project alone,
+ * even though the gateway resolved and stored real linked catalogs at
+ * onboarding time. The gateway always has real S3/DB config access, so
+ * `pg.getConfig(projectId)` (GatewayClient's `GET /config/:projectId`) is
+ * asked first when available; the local config is only a fallback for
+ * direct-DB/local-file setups that never route through a gateway.
+ * @param {import('../gateway/client.js').GatewayClient | import('pg').Pool} pg
+ * @param {string} projectId
+ * @returns {Promise<string[]>}
+ */
+export async function resolveGlobals(pg, projectId) {
+  if (typeof pg?.getConfig === 'function') {
+    try {
+      const config = await pg.getConfig(projectId)
+      if (config) return config.globals ?? []
+    } catch { /* gateway unavailable — fall through to local config */ }
+  }
+  try { return getConfig()?.globals ?? [] } catch { return [] }
+}
+
+/**
  * Load a project config directly from the `projects` table.
  * Used by MCP tool handlers when multi-project isolation is active.
  * Does not cache — call sites manage their own caching if needed.

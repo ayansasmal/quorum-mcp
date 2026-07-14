@@ -164,6 +164,14 @@ export class GatewayClient {
   }
 
   /**
+   * Return the project ID most recently set via setProjectId(), or null.
+   * @returns {string | null}
+   */
+  getProjectId() {
+    return this._projectId ?? null
+  }
+
+  /**
    * Make an authenticated HTTP request to the gateway.
    * @param {string} method
    * @param {string} path

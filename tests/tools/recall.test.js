@@ -36,9 +36,19 @@ vi.mock('../../src/audit/pipeline.js', () => ({
   }),
 }))
 
-vi.mock('../../src/config/loader.js', () => ({
-  getConfig: vi.fn(() => ({ globals: [] })),
-}))
+vi.mock('../../src/config/loader.js', () => {
+  const getConfig = vi.fn(() => ({ globals: [] }))
+  const resolveGlobals = vi.fn(async (pg) => {
+    if (typeof pg?.getConfig === 'function') {
+      try {
+        const config = await pg.getConfig()
+        if (config) return config.globals ?? []
+      } catch { /* fall through to local config */ }
+    }
+    try { return getConfig()?.globals ?? [] } catch { return [] }
+  })
+  return { getConfig, resolveGlobals }
+})
 
 const testCtx = { projectId: 'test-project', gatewayUrl: 'http://localhost:3001' }
 

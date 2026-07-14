@@ -14,6 +14,13 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { searchNodes, searchFacts } from '../../src/graph/client.js'
+import { getGatewayClient, setGatewayToken } from '../../src/gateway/client.js'
+
+/** Build an unsigned-looking JWT with the given payload (no signature verification client-side). */
+function fakeJwt(payload) {
+  const b64 = (obj) => Buffer.from(JSON.stringify(obj)).toString('base64url')
+  return `${b64({ alg: 'ES256' })}.${b64(payload)}.fake-signature`
+}
 
 /**
  * Stub fetch to satisfy the MCP streamable-http session handshake and capture
@@ -23,11 +30,13 @@ import { searchNodes, searchFacts } from '../../src/graph/client.js'
  */
 function stubGraphitiFetch() {
   let toolArgs = null
+  let toolCallHeaders = null
 
   vi.stubGlobal('fetch', vi.fn().mockImplementation(async (_url, opts) => {
     const body = JSON.parse(opts.body)
     if (body.method === 'tools/call') {
       toolArgs = body.params?.arguments ?? null
+      toolCallHeaders = opts.headers ?? null
     }
     return {
       ok:      true,
@@ -43,7 +52,7 @@ function stubGraphitiFetch() {
     }
   }))
 
-  return { getToolArgs: () => toolArgs }
+  return { getToolArgs: () => toolArgs, getToolCallHeaders: () => toolCallHeaders }
 }
 
 beforeEach(() => {
@@ -115,5 +124,41 @@ describe('searchFacts — group_ids scoping', () => {
 
     const args = getToolArgs()
     expect(args.group_ids).toEqual(['amethyst_munchkin'])
+  })
+})
+
+describe('callGraphiti — X-Quorum-Project header (gateway mode)', () => {
+  const gatewayUrl = 'http://fake-gateway'
+
+  beforeEach(() => {
+    process.env.QUORUM_GATEWAY_URL = gatewayUrl
+    setGatewayToken(fakeJwt({ sub: 'test-user', is_admin: false, exp: Math.floor(Date.now() / 1000) + 3600 }))
+    getGatewayClient(gatewayUrl).setProjectId('busy-hopper')
+  })
+
+  afterEach(() => {
+    delete process.env.QUORUM_GATEWAY_URL
+    setGatewayToken(null)
+  })
+
+  it('derives X-Quorum-Project from the gateway client project id, not the search call group_id(s)', async () => {
+    const { getToolCallHeaders } = stubGraphitiFetch()
+
+    // groupId here is a catalog id, deliberately different from the project id —
+    // proves the header comes from GatewayClient.getProjectId(), not the payload.
+    await searchNodes('query', { groupId: 'security-knowledge' })
+
+    const headers = getToolCallHeaders()
+    expect(headers).not.toBeNull()
+    expect(headers['X-Quorum-Project']).toBe('busy-hopper')
+  })
+
+  it('still sends the caller-supplied group_ids in the payload alongside the header', async () => {
+    const { getToolArgs, getToolCallHeaders } = stubGraphitiFetch()
+
+    await searchFacts('query', { groupId: 'security-knowledge' })
+
+    expect(getToolArgs().group_ids).toEqual(['security_knowledge'])
+    expect(getToolCallHeaders()['X-Quorum-Project']).toBe('busy-hopper')
   })
 })

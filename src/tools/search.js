@@ -14,13 +14,46 @@ import { withAuditPipeline } from '../audit/pipeline.js'
 import { searchNodes, searchFacts } from '../graph/client.js'
 import { buildAuditVersionImpact } from '../governance/provenance.js'
 import { KnowledgeStatus } from '../graph/schema.js'
-import { getConfig } from '../config/loader.js'
+import { resolveGlobals } from '../config/loader.js'
 
 const EXCLUDED_STATUSES = new Set([
   KnowledgeStatus.DRAFT,
   KnowledgeStatus.DEPRECATED,
   KnowledgeStatus.REJECTED,
 ])
+
+// Caps how many Graphiti calls this tool fires at once. Each call re-clones
+// FalkorDriver per group_id, and every clone re-issues ~15-20 index-creation
+// queries against FalkorDB (graphiti-core has no "already built" cache) — with
+// many linked global catalogs, firing all searches at once can exhaust the
+// FalkorDB client's connection pool and stall every call until abort.
+const SEARCH_CONCURRENCY = 4
+
+/**
+ * Run async task factories with a concurrency cap, resolving to
+ * Promise.allSettled-shaped results in the original order.
+ * @param {Array<() => Promise<unknown>>} tasks
+ * @param {number} concurrency
+ * @returns {Promise<Array<{status: 'fulfilled', value: unknown} | {status: 'rejected', reason: unknown}>>}
+ */
+async function settleWithConcurrency(tasks, concurrency) {
+  const results = new Array(tasks.length)
+  let nextIndex = 0
+
+  async function worker() {
+    while (nextIndex < tasks.length) {
+      const i = nextIndex++
+      try {
+        results[i] = { status: 'fulfilled', value: await tasks[i]() }
+      } catch (reason) {
+        results[i] = { status: 'rejected', reason }
+      }
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(concurrency, tasks.length) }, worker))
+  return results
+}
 
 export const schema = z.object({
   query: z.string().min(1).describe('Semantic search query'),
@@ -34,7 +67,7 @@ export const schema = z.object({
  * @param {import('pg').Pool} pg
  * @param {z.infer<typeof schema>} input
  * @param {import('../identity/resolver.js').ResolvedIdentity} [identity]
- * @param {{ projectId: string, gatewayUrl: string } | null} [ctx]
+ * @param {{ projectId: string, groupId?: string, gatewayUrl: string } | null} [ctx]
  * @returns {Promise<Record<string, unknown>>}
  */
 export async function handler(pg, input, identity, ctx) {
@@ -42,10 +75,12 @@ export async function handler(pg, input, identity, ctx) {
   if (!projectId) throw new Error('search: ctx.projectId is required — ensure a .quorum file exists in this workspace')
 
   // Linked global catalogs for cross-catalog reads (Wave B federation).
-  // getConfig() throws when config is not loaded (e.g. early startup or tests
-  // without a mock) — fall back to empty array so searches remain project-scoped.
-  let globals = []
-  try { globals = getConfig()?.globals ?? [] } catch { /* config not loaded */ }
+  // Resolved via the gateway when available (authoritative — see resolveGlobals()
+  // doc comment), falling back to project-scoped-only search otherwise. Must use
+  // ctx.groupId (the human-facing slug, e.g. 'busy-hopper') here, not ctx.projectId
+  // (the internal Postgres id, e.g. 'q_p13') — the gateway's GET /config/:id route
+  // checks the path param against req.user.project, which is always the group_id.
+  const globals = await resolveGlobals(pg, ctx?.groupId ?? projectId)
 
   const pipelineResult = await withAuditPipeline(
     pg,
@@ -56,15 +91,16 @@ export async function handler(pg, input, identity, ctx) {
       governanceData: { query: input.query, domain: input.domain },
     },
     async () => {
-      // Run project search + one search per linked global catalog in parallel.
+      // Run project search + one search per linked global catalog, capped at
+      // SEARCH_CONCURRENCY concurrent Graphiti calls (see constant doc above).
       // Separate per-catalog searches preserve catalog_id attribution on each result.
       // Facts are searched with all group IDs combined (facts are cross-referenced by
       // node UUID, not by catalog, so per-catalog attribution is not needed there).
-      const [projectResult, factsResult, ...globalResults] = await Promise.allSettled([
-        searchNodes(input.query, { limit: input.limit * 2, groupId: projectId }),
-        searchFacts(input.query, { groupIds: [projectId, ...globals] }),
-        ...globals.map((catalogId) => searchNodes(input.query, { limit: input.limit, groupId: catalogId })),
-      ])
+      const [projectResult, factsResult, ...globalResults] = await settleWithConcurrency([
+        () => searchNodes(input.query, { limit: input.limit * 2, groupId: projectId }),
+        () => searchFacts(input.query, { groupIds: [projectId, ...globals] }),
+        ...globals.map((catalogId) => () => searchNodes(input.query, { limit: input.limit, groupId: catalogId })),
+      ], SEARCH_CONCURRENCY)
 
       const projectNodes = projectResult.status === 'fulfilled'
         ? (projectResult.value?.nodes ?? [])

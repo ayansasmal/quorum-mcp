@@ -233,10 +233,17 @@ async function callGraphiti(tool, params, maxRetries = 3) {
       try {
         const { token } = gwClient._getToken()
         authHeaders = { Authorization: `Bearer ${token}` }
-        // X-Quorum-Project tells the gateway which project's group_id to inject.
-        // params.group_id carries the caller-supplied value; the proxy overwrites
-        // it with the sanitized project ID derived from this header.
-        const projectId = params.group_id ?? null
+        // X-Quorum-Project tells the gateway which project's group_id(s) to inject —
+        // the proxy (gateway/src/routes/graphiti.js) always overwrites whatever
+        // group_id/group_ids the caller supplies with values it derives server-side
+        // from this header (confused-deputy guard), so it must carry the real
+        // project, not a value parsed back out of the request payload. Previously
+        // read from params.group_id, but searchNodes/searchFacts (Wave B) send the
+        // plural params.group_ids instead — that field was always undefined, so
+        // this header silently never went out and every search_nodes /
+        // search_memory_facts call in gateway mode 400'd on the proxy's own
+        // "X-Quorum-Project header required" guard.
+        const projectId = gwClient.getProjectId()
         if (projectId) authHeaders['X-Quorum-Project'] = projectId
       } catch (err) {
         throw new GraphitiConnectionError(
@@ -282,8 +289,10 @@ async function callGraphiti(tool, params, maxRetries = 3) {
       if (!response.ok) {
         const body = await response.text().catch(() => '')
         log.error('graphiti response error', { tool, status: response.status, body, attempt })
-        // 400 usually means session expired — clear it so next attempt re-initializes
-        if (response.status === 400) _sessionId = null
+        // 400 usually means a malformed request; 404 is Graphiti's "Session not found"
+        // (e.g. after the Graphiti container restarts and drops its in-memory session
+        // store) — both invalidate our cached session so the next attempt re-initializes.
+        if (response.status === 400 || response.status === 404) _sessionId = null
         throw new GraphitiResponseError(
           `Graphiti responded ${response.status} for tool '${tool}'`,
           response.status,
@@ -294,8 +303,8 @@ async function callGraphiti(tool, params, maxRetries = 3) {
       return await parseMcpResponse(response)
     } catch (err) {
       if (err instanceof GraphitiResponseError) {
-        // Retry on 400 (session re-init) but not on other 4xx errors
-        if (err.status === 400 && attempt < maxRetries) { lastError = err; continue }
+        // Retry on 400/404 (session re-init) but not on other 4xx errors
+        if ((err.status === 400 || err.status === 404) && attempt < maxRetries) { lastError = err; continue }
         throw err
       }
       lastError = new GraphitiConnectionError(

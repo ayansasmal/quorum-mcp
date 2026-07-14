@@ -15,7 +15,7 @@ import { z } from 'zod'
 import { withAuditPipeline } from '../audit/pipeline.js'
 import { getCurrentVersion, getVersionHistory, getVersionAtDate, getSpecificVersion } from '../graph/queries.js'
 import { buildAuditVersionImpact } from '../governance/provenance.js'
-import { getConfig } from '../config/loader.js'
+import { resolveGlobals } from '../config/loader.js'
 
 const FRESHNESS_DAYS = 7
 
@@ -49,7 +49,7 @@ export const schema = z.object({
  * @param {import('pg').Pool} pg
  * @param {z.infer<typeof schema>} input
  * @param {import('../identity/resolver.js').ResolvedIdentity} [identity]
- * @param {{ projectId: string, gatewayUrl: string } | null} [ctx]
+ * @param {{ projectId: string, groupId?: string, gatewayUrl: string } | null} [ctx]
  * @returns {Promise<string | null>}
  */
 export async function handler(pg, input, identity, ctx) {
@@ -97,10 +97,11 @@ export async function handler(pg, input, identity, ctx) {
       }
 
       // ── Default: ACTIVE version with global catalog fallback (Wave B) ──────
-      // getConfig() throws when config is not loaded — fall back to empty array
-      // so recall remains project-scoped (safe backward-compat default).
-      let globals = []
-      try { globals = getConfig()?.globals ?? [] } catch { /* config not loaded */ }
+      // Resolved via the gateway when available (authoritative — see
+      // resolveGlobals() doc comment), falling back to project-scoped-only otherwise.
+      // Must use ctx.groupId (human-facing slug), not projectId (internal Postgres
+      // id) — see the matching note in search.js's handler().
+      const globals = await resolveGlobals(pg, ctx?.groupId ?? projectId)
 
       let version = await getCurrentVersion(pg, input.topic, input.key, projectId)
       let fromCatalogId = null  // group_id of the catalog this was found in; null = project-local
