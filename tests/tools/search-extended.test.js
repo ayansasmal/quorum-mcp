@@ -19,6 +19,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 vi.mock('../../src/graph/client.js', () => ({
   searchNodes: vi.fn(),
   searchFacts: vi.fn(),
+  normalizeGroupId: vi.fn((id) => (typeof id === 'string' ? id.replace(/-/g, '_') : id)),
 }))
 
 vi.mock('../../src/config/loader.js', () => {
@@ -58,6 +59,7 @@ function makeNode(overrides = {}) {
     name: 'auth:token-strategy',
     summary: 'Use JWT for Lambda',
     score: 0.9,
+    group_id: 'test_project', // normalized form of testCtx.projectId ('test-project') — project-local by default
     metadata: { author: 'alice', confidence: 0.85, status: 'ACTIVE', domain: 'auth' },
     ...overrides,
   }
@@ -308,30 +310,32 @@ describe('search — catalog_id annotation', () => {
 
   it('annotates global catalog results with source=global and catalog_id=group_id', async () => {
     const { searchNodes, searchFacts } = await import('../../src/graph/client.js')
-    const { getConfig } = await import('../../src/config/loader.js')
 
-    vi.mocked(getConfig).mockReturnValue({ globals: ['security-standards'] })
-    // First call: project (no nodes), second call: global catalog (one node)
-    vi.mocked(searchNodes)
-      .mockResolvedValueOnce({ nodes: [] })
-      .mockResolvedValueOnce({ nodes: [makeNode({ uuid: 'global-n1', name: 'security:tls' })] })
+    // Single combined call returns a node whose group_id belongs to a linked
+    // catalog, not the project — attribution is derived from that field.
+    vi.mocked(searchNodes).mockResolvedValue({
+      nodes: [makeNode({ uuid: 'global-n1', name: 'security:tls', group_id: 'security_standards' })],
+    })
     vi.mocked(searchFacts).mockResolvedValue({ facts: [] })
 
     const { handler } = await import('../../src/tools/search.js')
     const result = await handler(makePg(), { query: 'tls', author: 'alice' }, undefined, testCtx)
 
     expect(result.results[0].source).toBe('global')
-    expect(result.results[0].catalog_id).toBe('security-standards')
+    expect(result.results[0].catalog_id).toBe('security_standards')
   })
 
   it('project wins deduplication over global when same uuid appears in both', async () => {
     const { searchNodes, searchFacts } = await import('../../src/graph/client.js')
-    const { getConfig } = await import('../../src/config/loader.js')
 
-    vi.mocked(getConfig).mockReturnValue({ globals: ['security-standards'] })
-    vi.mocked(searchNodes)
-      .mockResolvedValueOnce({ nodes: [makeNode({ uuid: 'shared-id' })] })           // project
-      .mockResolvedValueOnce({ nodes: [makeNode({ uuid: 'shared-id', score: 0.95 })] }) // global (higher score, but deduped)
+    // One combined call returns both a project-local and a global node sharing
+    // the same uuid (e.g. re-attributed episode) — project must win the tie.
+    vi.mocked(searchNodes).mockResolvedValue({
+      nodes: [
+        makeNode({ uuid: 'shared-id', group_id: 'test_project' }),
+        makeNode({ uuid: 'shared-id', group_id: 'security_standards', score: 0.95 }),
+      ],
+    })
     vi.mocked(searchFacts).mockResolvedValue({ facts: [] })
 
     const { handler } = await import('../../src/tools/search.js')

@@ -233,11 +233,13 @@ async function callGraphiti(tool, params, maxRetries = 3) {
       try {
         const { token } = gwClient._getToken()
         authHeaders = { Authorization: `Bearer ${token}` }
-        // X-Quorum-Project tells the gateway which project's group_id(s) to inject —
-        // the proxy (gateway/src/routes/graphiti.js) always overwrites whatever
-        // group_id/group_ids the caller supplies with values it derives server-side
-        // from this header (confused-deputy guard), so it must carry the real
-        // project, not a value parsed back out of the request payload. Previously
+        // X-Quorum-Project tells the gateway which project's group_id(s) are authorized —
+        // the proxy (gateway/src/routes/graphiti.js) validates any group_id/group_ids the
+        // caller supplies against that project's authorized set (project + its linked
+        // globals) and only widens to the full set when the caller didn't scope the
+        // request (confused-deputy guard: never expand, only narrow-or-default), so this
+        // header must carry the real project, not a value parsed back out of the request
+        // payload. Previously
         // read from params.group_id, but searchNodes/searchFacts (Wave B) send the
         // plural params.group_ids instead — that field was always undefined, so
         // this header silently never went out and every search_nodes /
@@ -277,7 +279,13 @@ async function callGraphiti(tool, params, maxRetries = 3) {
           'Mcp-Session-Id': _sessionId,
           ...authHeaders,
         },
-        signal: AbortSignal.timeout(30_000),
+        // 90s, not 30s: heavily-federated calls (many linked global catalogs) are
+        // genuinely still processing (per-group_id index checks + OpenAI embedding
+        // round-trips) well past 30s. Graphiti-core fans these out concurrently per
+        // group_id (handle_multiple_group_ids -> semaphore_gather, default cap 20),
+        // not serially, but wall time still grows with how many group_ids are in
+        // play since they share one FalkorDB connection pool.
+        signal: AbortSignal.timeout(90_000),
         body: JSON.stringify({
           jsonrpc: '2.0',
           id:      Date.now(),
@@ -308,7 +316,7 @@ async function callGraphiti(tool, params, maxRetries = 3) {
         throw err
       }
       lastError = new GraphitiConnectionError(
-        `Could not reach Graphiti at ${GRAPHITI_URL}: ${err.message}`,
+        `Could not reach Graphiti at ${baseUrl}: ${err.message}`,
         err,
       )
       log.error('graphiti connection error', { tool, error: lastError.message, attempt })

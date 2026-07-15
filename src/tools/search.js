@@ -11,7 +11,7 @@
 
 import { z } from 'zod'
 import { withAuditPipeline } from '../audit/pipeline.js'
-import { searchNodes, searchFacts } from '../graph/client.js'
+import { searchNodes, searchFacts, normalizeGroupId } from '../graph/client.js'
 import { buildAuditVersionImpact } from '../governance/provenance.js'
 import { KnowledgeStatus } from '../graph/schema.js'
 import { resolveGlobals } from '../config/loader.js'
@@ -21,39 +21,6 @@ const EXCLUDED_STATUSES = new Set([
   KnowledgeStatus.DEPRECATED,
   KnowledgeStatus.REJECTED,
 ])
-
-// Caps how many Graphiti calls this tool fires at once. Each call re-clones
-// FalkorDriver per group_id, and every clone re-issues ~15-20 index-creation
-// queries against FalkorDB (graphiti-core has no "already built" cache) — with
-// many linked global catalogs, firing all searches at once can exhaust the
-// FalkorDB client's connection pool and stall every call until abort.
-const SEARCH_CONCURRENCY = 4
-
-/**
- * Run async task factories with a concurrency cap, resolving to
- * Promise.allSettled-shaped results in the original order.
- * @param {Array<() => Promise<unknown>>} tasks
- * @param {number} concurrency
- * @returns {Promise<Array<{status: 'fulfilled', value: unknown} | {status: 'rejected', reason: unknown}>>}
- */
-async function settleWithConcurrency(tasks, concurrency) {
-  const results = new Array(tasks.length)
-  let nextIndex = 0
-
-  async function worker() {
-    while (nextIndex < tasks.length) {
-      const i = nextIndex++
-      try {
-        results[i] = { status: 'fulfilled', value: await tasks[i]() }
-      } catch (reason) {
-        results[i] = { status: 'rejected', reason }
-      }
-    }
-  }
-
-  await Promise.all(Array.from({ length: Math.min(concurrency, tasks.length) }, worker))
-  return results
-}
 
 export const schema = z.object({
   query: z.string().min(1).describe('Semantic search query'),
@@ -91,34 +58,35 @@ export async function handler(pg, input, identity, ctx) {
       governanceData: { query: input.query, domain: input.domain },
     },
     async () => {
-      // Run project search + one search per linked global catalog, capped at
-      // SEARCH_CONCURRENCY concurrent Graphiti calls (see constant doc above).
-      // Separate per-catalog searches preserve catalog_id attribution on each result.
-      // Facts are searched with all group IDs combined (facts are cross-referenced by
-      // node UUID, not by catalog, so per-catalog attribution is not needed there).
-      const [projectResult, factsResult, ...globalResults] = await settleWithConcurrency([
-        () => searchNodes(input.query, { limit: input.limit * 2, groupId: projectId }),
-        () => searchFacts(input.query, { groupIds: [projectId, ...globals] }),
-        ...globals.map((catalogId) => () => searchNodes(input.query, { limit: input.limit, groupId: catalogId })),
-      ], SEARCH_CONCURRENCY)
+      // One combined search across project + all linked global catalogs, plus
+      // one facts search over the same group set. Graphiti's node/edge/fact
+      // response shapes already carry group_id per result (NodeResult.group_id,
+      // EdgeResult.group_id — see mcp_server/src/models/response_types.py in
+      // quorum-graphiti), so catalog attribution is derived from that field
+      // rather than needing a separate Graphiti call per linked catalog.
+      const allGroupIds = [projectId, ...globals]
+      const [nodesResult, factsResult] = await Promise.allSettled([
+        searchNodes(input.query, { limit: input.limit * 2, groupIds: allGroupIds }),
+        searchFacts(input.query, { groupIds: allGroupIds }),
+      ])
 
-      const projectNodes = projectResult.status === 'fulfilled'
-        ? (projectResult.value?.nodes ?? [])
-        : []
+      const nodes = nodesResult.status === 'fulfilled' ? (nodesResult.value?.nodes ?? []) : []
       const facts = factsResult.status === 'fulfilled' ? (factsResult.value?.facts ?? []) : []
 
-      // Tag source and catalog_id on each node before merging.
+      // Tag source and catalog_id from each result's own group_id.
       // catalog_id is null for project-local entries; the catalog group_id for global entries.
-      const taggedProject = projectNodes.map((n) => ({ ...n, _source: 'project', _catalog_id: null }))
-      const taggedGlobal  = globalResults.flatMap((result, i) => {
-        if (result.status !== 'fulfilled') return []
-        const catalogId = globals[i]
-        return (result.value?.nodes ?? []).map((n) => ({ ...n, _source: 'global', _catalog_id: catalogId }))
-      })
+      // Graphiti normalizes group_id (hyphens -> underscores) before storage, so compare
+      // against normalized projectId rather than the raw value.
+      const normalizedProjectId = normalizeGroupId(projectId)
+      const tagged = nodes.map((n) => (
+        n.group_id === normalizedProjectId
+          ? { ...n, _source: 'project', _catalog_id: null }
+          : { ...n, _source: 'global', _catalog_id: n.group_id }
+      ))
 
-      // Merge + deduplicate by episode UUID (project wins over global on tie)
+      // Deduplicate by episode UUID (project wins over global on tie)
       const seen = new Set()
-      const merged = [...taggedProject, ...taggedGlobal].filter((node) => {
+      const merged = [...tagged].sort((a, b) => (a._source === 'project' ? -1 : 1)).filter((node) => {
         const id = node.uuid ?? node.episode_id ?? node.name
         if (seen.has(id)) return false
         seen.add(id)

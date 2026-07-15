@@ -19,6 +19,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 vi.mock('../../src/graph/client.js', () => ({
   searchNodes: vi.fn(),
   searchFacts: vi.fn(),
+  normalizeGroupId: vi.fn((id) => (typeof id === 'string' ? id.replace(/-/g, '_') : id)),
 }))
 
 vi.mock('../../src/audit/pipeline.js', () => ({
