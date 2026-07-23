@@ -253,6 +253,7 @@ async function callGraphiti(tool, params, maxRetries = 3) {
       }
     }
   }
+  if (log.traceId) authHeaders['X-Quorum-Trace-Id'] = log.traceId
 
   let lastError
   for (let attempt = 0; attempt <= maxRetries; attempt++) {

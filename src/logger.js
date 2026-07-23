@@ -9,7 +9,7 @@
  * Level: QUORUM_LOG_LEVEL=debug|info|warn|error  (default: info)
  *
  * Usage in server.js:
- *   log.startCall(toolName)   → creates per-call file, returns its path
+ *   log.startCall(toolName)   → creates per-call file, returns call metadata
  *   log.endCall()             → clears per-call file reference
  *   log.path                  → per-call file (if active), else shared mcp.log
  */
@@ -107,7 +107,7 @@ export const log = {
    * Create a per-call log file and activate it.
    * Call this at the top of each tool dispatch before any logging.
    * @param {string} toolName
-   * @returns {string} absolute path to the per-call log file
+   * @returns {{ path: string, traceId: string, end: () => void }} active call metadata
    */
   startCall(toolName) {
     const ts = new Date().toISOString().replace(/[:.]/g, '-')
@@ -117,7 +117,16 @@ export const log = {
       traceId: randomUUID(),
       seq: 0,
     }
-    return _callLogFile
+    const traceId = _callContext.traceId
+    return {
+      path: _callLogFile,
+      traceId,
+      end: () => {
+        if (_callContext?.traceId === traceId) {
+          log.endCall()
+        }
+      },
+    }
   },
 
   /** Clear the per-call log reference at the end of each tool dispatch. */

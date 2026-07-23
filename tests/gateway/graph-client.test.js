@@ -13,6 +13,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { log } from '../../src/logger.js'
 import { searchNodes, searchFacts, addEpisode, addSupersedingEpisode } from '../../src/graph/client.js'
 import { getGatewayClient, setGatewayToken } from '../../src/gateway/client.js'
 
@@ -197,6 +198,20 @@ describe('callGraphiti — X-Quorum-Project header (gateway mode)', () => {
     setGatewayToken(null)
   })
 
+  it('forwards X-Quorum-Trace-Id on both initialize and tool call requests when present', async () => {
+    const { getToolCallHeaders } = stubGraphitiFetch()
+    const start = log.startCall('search')
+
+    await searchNodes('query', { groupId: 'security-knowledge' })
+
+    const headers = getToolCallHeaders()
+    expect(headers['X-Quorum-Trace-Id']).toBe(start.traceId)
+    const fetchCalls = vi.mocked(fetch).mock.calls
+    expect(fetchCalls[0][1].headers['X-Quorum-Trace-Id']).toBe(start.traceId)
+
+    start.end()
+  })
+
   it('derives X-Quorum-Project from the gateway client project id, not the search call group_id(s)', async () => {
     const { getToolCallHeaders } = stubGraphitiFetch()
 
@@ -216,5 +231,16 @@ describe('callGraphiti — X-Quorum-Project header (gateway mode)', () => {
 
     expect(getToolArgs().group_ids).toEqual(['security_knowledge'])
     expect(getToolCallHeaders()['X-Quorum-Project']).toBe('busy-hopper')
+  })
+
+  it('does not send X-Quorum-Trace-Id when no active tool-call trace exists', async () => {
+    const { getToolCallHeaders } = stubGraphitiFetch()
+
+    await searchFacts('query', { groupId: 'security-knowledge' })
+
+    const headers = getToolCallHeaders()
+    expect(headers['X-Quorum-Trace-Id']).toBeUndefined()
+    const fetchCalls = vi.mocked(fetch).mock.calls
+    expect(fetchCalls[0][1].headers['X-Quorum-Trace-Id']).toBeUndefined()
   })
 })
