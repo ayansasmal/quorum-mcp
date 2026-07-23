@@ -145,25 +145,40 @@ let _sessionId = null
  * @returns {Promise<string>} the session ID
  */
 async function initSession(endpoint, authHeaders = {}) {
-  const res = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Accept':        'application/json, text/event-stream',
-      ...authHeaders,
-    },
-    body: JSON.stringify({
-      jsonrpc: '2.0',
-      id:      1,
-      method:  'initialize',
-      params:  {
-        protocolVersion: '2024-11-05',
-        capabilities:    {},
-        clientInfo:      { name: 'quorum', version: '1.0' },
+  // AbortSignal.timeout() schedules a timer that is NOT cancelled when the fetch it's
+  // attached to settles early — under bursty call volume this leaves piles of timers
+  // that fire later, detached from any in-flight request. Use an explicit
+  // AbortController + clearTimeout so the timer never outlives the call.
+  const initStartedAt = Date.now()
+  const abortController = new AbortController()
+  const timeoutId = setTimeout(() => {
+    log.debug('graphiti init timeout fired', { elapsed_ms: Date.now() - initStartedAt, endpoint })
+    abortController.abort(new DOMException('The operation was aborted due to timeout', 'TimeoutError'))
+  }, 30_000)
+  let res
+  try {
+    res = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept':        'application/json, text/event-stream',
+        ...authHeaders,
       },
-    }),
-    signal: AbortSignal.timeout(30_000),
-  })
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id:      1,
+        method:  'initialize',
+        params:  {
+          protocolVersion: '2024-11-05',
+          capabilities:    {},
+          clientInfo:      { name: 'quorum', version: '1.0' },
+        },
+      }),
+      signal: abortController.signal,
+    })
+  } finally {
+    clearTimeout(timeoutId)
+  }
 
   if (!res.ok) {
     const body = await res.text().catch(() => '')
@@ -271,6 +286,17 @@ async function callGraphiti(tool, params, maxRetries = 3) {
       await new Promise((r) => setTimeout(r, 1000 * 2 ** (attempt - 1)))
     }
 
+    // AbortSignal.timeout() schedules a timer that is NOT cancelled when the fetch it's
+    // attached to settles early — under bursty call volume (many calls completing in
+    // single-digit ms) this leaves piles of timers that fire ~90s later, detached from
+    // any in-flight request. Use an explicit AbortController + clearTimeout so the timer
+    // never outlives the call.
+    const callStartedAt = Date.now()
+    const abortController = new AbortController()
+    const timeoutId = setTimeout(() => {
+      log.debug('graphiti call timeout fired', { tool, attempt, elapsed_ms: Date.now() - callStartedAt })
+      abortController.abort(new DOMException('The operation was aborted due to timeout', 'TimeoutError'))
+    }, 90_000)
     try {
       const response = await fetch(endpoint, {
         method: 'POST',
@@ -286,7 +312,7 @@ async function callGraphiti(tool, params, maxRetries = 3) {
         // group_id (handle_multiple_group_ids -> semaphore_gather, default cap 20),
         // not serially, but wall time still grows with how many group_ids are in
         // play since they share one FalkorDB connection pool.
-        signal: AbortSignal.timeout(90_000),
+        signal: abortController.signal,
         body: JSON.stringify({
           jsonrpc: '2.0',
           id:      Date.now(),
@@ -321,6 +347,8 @@ async function callGraphiti(tool, params, maxRetries = 3) {
         err,
       )
       log.error('graphiti connection error', { tool, error: lastError.message, attempt })
+    } finally {
+      clearTimeout(timeoutId)
     }
   }
 
