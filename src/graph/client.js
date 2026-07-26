@@ -16,13 +16,17 @@
  * copy of this file that runs INSIDE the gateway and reaches Graphiti directly.
  * It intentionally omits the `log` import and the gateway-client JWT attach
  * below — the gateway has no such modules. Keep that divergence when syncing;
- * the request hardening (required groupId, 30s timeout, session-init checks)
- * must stay identical in both copies.
+ * the request hardening (required groupId, timeout, retry/backoff) must stay
+ * identical in both copies. The two copies intentionally keep different
+ * timeout values (30s gateway / 90s here) — a known, separately-tracked sync
+ * gap, not something to unify as part of unrelated changes.
  *
- * MCP session protocol (streamable-http transport):
- *   1. POST /mcp with method="initialize" → server returns Mcp-Session-Id header
- *   2. All subsequent tool calls include that header
- *   3. 400 responses indicate expired/invalid session → re-initialize and retry
+ * MCP transport (streamable-http, stateless): Graphiti's MCP server runs with
+ * `stateless_http=True` (quorum-graphiti fork), so every tool call is a single,
+ * self-contained POST /mcp with method="tools/call" — no initialize handshake,
+ * no Mcp-Session-Id, nothing shared across concurrent calls. This replaced a
+ * shared-session design that raced under concurrency: see
+ * quorum/docs/RCA-search-concurrency-session-stall-2026-07-27.md.
  */
 
 import { randomUUID } from 'crypto'
@@ -131,66 +135,6 @@ export class GraphitiResponseError extends Error {
   }
 }
 
-// ── MCP session management ─────────────────────────────────────────────────────
-
-/** Active MCP session ID (per process — one session shared across all tool calls). */
-let _sessionId = null
-
-/**
- * Initialize an MCP session with Graphiti via the streamable-http handshake.
- * Stores the returned Mcp-Session-Id for reuse on subsequent calls.
- *
- * @param {string} endpoint  — full URL to /mcp
- * @param {Record<string, string>} [authHeaders] — optional Authorization header
- * @returns {Promise<string>} the session ID
- */
-async function initSession(endpoint, authHeaders = {}) {
-  // AbortSignal.timeout() schedules a timer that is NOT cancelled when the fetch it's
-  // attached to settles early — under bursty call volume this leaves piles of timers
-  // that fire later, detached from any in-flight request. Use an explicit
-  // AbortController + clearTimeout so the timer never outlives the call.
-  const initStartedAt = Date.now()
-  const abortController = new AbortController()
-  const timeoutId = setTimeout(() => {
-    log.debug('graphiti init timeout fired', { elapsed_ms: Date.now() - initStartedAt, endpoint })
-    abortController.abort(new DOMException('The operation was aborted due to timeout', 'TimeoutError'))
-  }, 30_000)
-  let res
-  try {
-    res = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept':        'application/json, text/event-stream',
-        ...authHeaders,
-      },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id:      1,
-        method:  'initialize',
-        params:  {
-          protocolVersion: '2024-11-05',
-          capabilities:    {},
-          clientInfo:      { name: 'quorum', version: '1.0' },
-        },
-      }),
-      signal: abortController.signal,
-    })
-  } finally {
-    clearTimeout(timeoutId)
-  }
-
-  if (!res.ok) {
-    const body = await res.text().catch(() => '')
-    throw new GraphitiConnectionError(
-      `Graphiti session init failed (${res.status}): ${body}`)
-  }
-  const sessionId = res.headers.get('mcp-session-id')
-  if (!sessionId) throw new GraphitiConnectionError('Graphiti MCP did not return a session ID')
-  _sessionId = sessionId
-  return sessionId
-}
-
 /**
  * Parse the MCP streamable-http response (SSE envelope or plain JSON).
  * Extracts the JSON-RPC result and returns the tool's structured output.
@@ -219,8 +163,11 @@ async function parseMcpResponse(response) {
 
 /**
  * POST to Graphiti's MCP endpoint using JSON-RPC 2.0 over streamable-http.
- * Manages the MCP session automatically (initialize on first call, re-initialize on 400).
- * Retries connection errors with exponential backoff.
+ * Stateless: Graphiti's MCP server runs with `stateless_http=True`, so every
+ * attempt is a fully self-contained request — no session handshake, no
+ * Mcp-Session-Id header, nothing shared across concurrent calls to race on.
+ * Retries connection/timeout errors with exponential backoff; a 4xx/5xx
+ * response from Graphiti is not retried.
  *
  * @param {string} tool
  * @param {Record<string, unknown>} params
@@ -234,7 +181,8 @@ async function callGraphiti(tool, params, maxRetries = 3) {
 
   const { baseUrl, useGateway } = graphitiTarget()
   const endpoint = `${baseUrl}/mcp`
-  log.debug('graphiti call', { tool, groupId: params.group_id, endpoint })
+  const chainStartedAt = Date.now()
+  log.debug('graphiti call', { tool, groupId: params.group_id, endpoint, maxRetries })
 
   // In gateway mode, attach JWT + X-Quorum-Project so the /graphiti/* proxy
   // can verify the token and inject group_id before forwarding to Graphiti.
@@ -272,18 +220,10 @@ async function callGraphiti(tool, params, maxRetries = 3) {
 
   let lastError
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    // Ensure a live MCP session exists before making the tool call
-    if (!_sessionId) {
-      try {
-        await initSession(endpoint, authHeaders)
-      } catch (err) {
-        throw new GraphitiConnectionError(
-          `Could not reach Graphiti at ${baseUrl}: ${err.message}`, err)
-      }
-    }
-
     if (attempt > 0) {
-      await new Promise((r) => setTimeout(r, 1000 * 2 ** (attempt - 1)))
+      const waitMs = 1000 * 2 ** (attempt - 1)
+      log.debug('graphiti backoff wait', { tool, attempt, wait_ms: waitMs })
+      await new Promise((r) => setTimeout(r, waitMs))
     }
 
     // AbortSignal.timeout() schedules a timer that is NOT cancelled when the fetch it's
@@ -297,13 +237,16 @@ async function callGraphiti(tool, params, maxRetries = 3) {
       log.debug('graphiti call timeout fired', { tool, attempt, elapsed_ms: Date.now() - callStartedAt })
       abortController.abort(new DOMException('The operation was aborted due to timeout', 'TimeoutError'))
     }, 90_000)
+    log.debug('graphiti call attempt start', {
+      tool, attempt,
+      chain_elapsed_ms: Date.now() - chainStartedAt,
+    })
     try {
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: {
-          'Content-Type':   'application/json',
-          'Accept':         'application/json, text/event-stream',
-          'Mcp-Session-Id': _sessionId,
+          'Content-Type': 'application/json',
+          'Accept':       'application/json, text/event-stream',
           ...authHeaders,
         },
         // 90s, not 30s: heavily-federated calls (many linked global catalogs) are
@@ -324,10 +267,6 @@ async function callGraphiti(tool, params, maxRetries = 3) {
       if (!response.ok) {
         const body = await response.text().catch(() => '')
         log.error('graphiti response error', { tool, status: response.status, body, attempt })
-        // 400 usually means a malformed request; 404 is Graphiti's "Session not found"
-        // (e.g. after the Graphiti container restarts and drops its in-memory session
-        // store) — both invalidate our cached session so the next attempt re-initializes.
-        if (response.status === 400 || response.status === 404) _sessionId = null
         throw new GraphitiResponseError(
           `Graphiti responded ${response.status} for tool '${tool}'`,
           response.status,
@@ -335,11 +274,15 @@ async function callGraphiti(tool, params, maxRetries = 3) {
         )
       }
 
-      return await parseMcpResponse(response)
+      const result = await parseMcpResponse(response)
+      log.debug('graphiti call success', {
+        tool, attempt,
+        attempt_elapsed_ms: Date.now() - callStartedAt,
+        chain_elapsed_ms: Date.now() - chainStartedAt,
+      })
+      return result
     } catch (err) {
       if (err instanceof GraphitiResponseError) {
-        // Retry on 400/404 (session re-init) but not on other 4xx errors
-        if ((err.status === 400 || err.status === 404) && attempt < maxRetries) { lastError = err; continue }
         throw err
       }
       lastError = new GraphitiConnectionError(
@@ -352,6 +295,12 @@ async function callGraphiti(tool, params, maxRetries = 3) {
     }
   }
 
+  log.error('graphiti call exhausted', {
+    tool, maxRetries,
+    chain_elapsed_ms: Date.now() - chainStartedAt,
+    error_name: lastError?.name,
+    error_message: lastError?.message,
+  })
   throw lastError
 }
 

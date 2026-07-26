@@ -24,17 +24,23 @@ function fakeJwt(payload) {
 }
 
 /**
- * Stub fetch to satisfy the MCP streamable-http session handshake and capture
- * the arguments forwarded to a Graphiti tool call.
+ * Stub fetch for a single, stateless `tools/call` POST and capture the
+ * arguments forwarded to a Graphiti tool call.
  *
- * @returns {{ getToolArgs: () => object | null }}
+ * Graphiti's MCP server runs with `stateless_http=True`: every call is one
+ * self-contained POST with method="tools/call" — no initialize handshake,
+ * no Mcp-Session-Id header.
+ *
+ * @returns {{ getToolArgs: () => object | null, getToolCallHeaders: () => object | null, getAllCalls: () => Array<{ headers: object, body: object }> }}
  */
 function stubGraphitiFetch() {
   let toolArgs = null
   let toolCallHeaders = null
+  const calls = []
 
   vi.stubGlobal('fetch', vi.fn().mockImplementation(async (_url, opts) => {
     const body = JSON.parse(opts.body)
+    calls.push({ headers: opts.headers ?? {}, body })
     if (body.method === 'tools/call') {
       toolArgs = body.params?.arguments ?? null
       toolCallHeaders = opts.headers ?? null
@@ -43,7 +49,7 @@ function stubGraphitiFetch() {
       ok:      true,
       status:  200,
       headers: {
-        get: (name) => (name.toLowerCase() === 'mcp-session-id' ? 'test-session' : null),
+        get: () => null,
       },
       text: async () => JSON.stringify({
         jsonrpc: '2.0',
@@ -53,7 +59,7 @@ function stubGraphitiFetch() {
     }
   }))
 
-  return { getToolArgs: () => toolArgs, getToolCallHeaders: () => toolCallHeaders }
+  return { getToolArgs: () => toolArgs, getToolCallHeaders: () => toolCallHeaders, getAllCalls: () => calls }
 }
 
 beforeEach(() => {
@@ -198,7 +204,7 @@ describe('callGraphiti — X-Quorum-Project header (gateway mode)', () => {
     setGatewayToken(null)
   })
 
-  it('forwards X-Quorum-Trace-Id on both initialize and tool call requests when present', async () => {
+  it('forwards X-Quorum-Trace-Id on the tool call request when present', async () => {
     const { getToolCallHeaders } = stubGraphitiFetch()
     const start = log.startCall('search')
 
@@ -242,5 +248,32 @@ describe('callGraphiti — X-Quorum-Project header (gateway mode)', () => {
     expect(headers['X-Quorum-Trace-Id']).toBeUndefined()
     const fetchCalls = vi.mocked(fetch).mock.calls
     expect(fetchCalls[0][1].headers['X-Quorum-Trace-Id']).toBeUndefined()
+  })
+})
+
+describe('callGraphiti — stateless concurrency', () => {
+  // Regression test for quorum/docs/RCA-search-concurrency-session-stall-2026-07-27.md:
+  // concurrent calls used to share one cached Mcp-Session-Id with no locking, so one
+  // caller could get no response until its own timeout fired. Each call is now a fully
+  // independent request — no session to race on.
+  it('fires one independent request per concurrent call, none carrying a session header', async () => {
+    const { getAllCalls } = stubGraphitiFetch()
+
+    const CONCURRENCY = 5
+    await Promise.all(
+      Array.from({ length: CONCURRENCY }, (_, i) =>
+        searchNodes(`query-${i}`, { groupId: 'amethyst_munchkin' })),
+    )
+
+    const calls = getAllCalls()
+    expect(calls).toHaveLength(CONCURRENCY)
+
+    const queries = calls.map((c) => c.body.params?.arguments?.query).sort()
+    expect(queries).toEqual(Array.from({ length: CONCURRENCY }, (_, i) => `query-${i}`).sort())
+
+    for (const call of calls) {
+      const headerNames = Object.keys(call.headers).map((h) => h.toLowerCase())
+      expect(headerNames).not.toContain('mcp-session-id')
+    }
   })
 })
